@@ -1,0 +1,4268 @@
+openapi: 3.0.0
+# FERC API
+servers:
+  - description: Running this application XBRL US server
+    url: 'https://eforms.ferc.gov/'
+
+info:
+  version: "V1"
+  title: FERC API
+  description: |
+    The fercapi.yaml file above defines the  ferc API and can be [used to build and test queries below on this web page] to retrieve data from the FERC filings database. 
+    
+
+    You'll need to request provisioning for your account to get started.
+
+    ## Authorization Flow
+
+    We use [OAuth2 JWT](https://jwt.io/) flows to secure interactions. Below are **CURL** examples for typical **XBRL API** flows to request, return and use a token, which is required to process queries. Because the FERC API is sessionless, each "session" will always begin with the [OAuth2 JWT Access Token Flow](https://jwt.io/introduction).
+
+    ### Access Token Flow
+
+    This flow shows the steps required to interact with the API
+
+    1. Send an HTTP `POST` request to the tokenUrl: `/oauth2/token`:
+      ```http
+      POST /oauth2/token HTTP/1.1 
+      Host: <eforms.ferc.gov> 
+      Content-Type: application/x-www-form-urlencoded 
+      Body: {
+        "grant_type": password,
+        "client_id": "FERC Client",
+        "client_secret": "client secret",
+        "username": "username",
+        "password": "password",
+        "platform": pc
+      }
+      ```
+    2. Upon a successful authorization grant, the server will respond with an `access_token`:
+      ```http
+      HTTP/1.1 200 OK
+      Request URL: <example.com>/oauth2/token
+      Date: <EEE, dd MMM yyyy HH:mm:ss z>
+      Content-Length: 500
+      Body: {
+        "platform": "pc",
+        "access_token": "eyJ...124nOvc",
+        "refresh_token": "eyJ...124nOvc",
+        "expires_in" : 3600,
+        "refresh_token_expires_in": 10800,
+        "token_type": "bearer"
+      }
+      ```
+    3. Add a new `Authorization` header with type `Bearer` and the contents of the above `access_token`
+      ```http
+      GET </some/route> HTTP/1.1
+      Host: <eforms.ferc.gov> 
+      Authorization: Bearer yJ...124nOvc
+      Content-Type: application/json; charset=utf-8 
+      Body: <...>
+      ```
+      
+    **Once an access_token has been acquired, it can be used on all queries with your account until it returns a 401.** If this occurs, simply request a new token using the credentials from before.
+    
+  contact:
+    name: FERC
+    email: support@ferc.gov
+tags:
+  - name: oauth2
+    description: " -- acquire authorization, receive tokens, and check tokens"
+  - name: Facts
+    description: " -- return XBRL facts and metadata contained in a report"
+  - name: Reports
+    description: " -- get details about XBRL reports"
+  - name: Entity
+    description: " -- get details about entities making XBRL filings"
+  - name: DTS
+    description: " -- get details information about the discoverable taxonomy set (taxonomy)"
+  - name: Concepts
+    description: " -- get information about XBRL concepts in a taxonomy"
+  - name: Labels
+    description: " -- return metadata associated with a concept and a DTS identifier"
+  - name: Networks
+    description: " -- return network information about concepts and/or relationships in a dts"
+  - name: Relationships
+    description: " -- get relationship information associated with a network and/or DTS identifier"
+  - name: Documents
+    description: " -- request document information associated with a DTS or report"
+    
+security:
+  - oauth2: [ROLE_CLIENT, ROLE_USER]
+paths:
+  /oauth2/token:
+    summary: Acquire an access token by fulfilling a client_credentials grant, or a password grant.
+    post:
+      operationId: tokenUrl
+      tags: [oauth2]
+      security: []
+      description: >
+        Assuming a valid login exists, this route allows a trusted client to acquire an access token for itself, or to request an access token for a specific user. **You may send both `client_credentials` grants and `password` grants via the following**: 
+         * **application/x-www-form-urlencoded**
+
+
+        **[Read more](https://oauth.net/2/grant-types/)**
+      requestBody:
+        content:
+          # application/json:
+          #   schema:
+          #     $ref: '#/components/schemas/authorization_grant'
+          #   example:
+          #     grant_type: password
+          #     client_id: 1223
+          #     client_secret: xhOEnAX2M...gaIYLXOvCe25Q
+          #     username: Your_email@domain.com
+          #     password: someSecurePassword
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/authorization_grant'
+          # multipart/form-data:
+          #   schema:
+          #     $ref: '#/components/schemas/authorization_grant'
+      responses:
+        '200':
+          description: > 
+            The authorization grant has been validated, and an access token is granted. **[Read more](https://jwt.io/introduction/)**
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  platform :
+                    type: string
+                    example: pc
+                  access_token:
+                    type: string
+                    format: byte
+                    example: eyJ...124nOvc
+                    description: A JWT access token. **[Read more](https://jwt.io/)**
+                  refresh_token:
+                    type: string
+                    format: byte
+                    example: eyJ...124nOvc
+                    description: A JWT access token. **[Read more](https://jwt.io/)**
+                  expires_in:
+                    type: integer
+                    example: 3600
+                  refresh_token_expires_in:
+                    type: integer
+                    example: 3600
+                  token_type:
+                    type: string
+                    example: bearer
+                    description: >
+                      _The token_type will always be bearer._ The access_token is considered a bearer token, and thus should be placed in all subqequent requests to the resource endpoints by using the following header:
+                        * Authorization: Bearer [token]
+          # -----------------------------------------------------
+          # Links
+          # -----------------------------------------------------
+          links:
+            bearerAuth:   # <---- arbitrary name for the link
+              operationId: tokenUrl
+              parameters:
+                bearerAuth: '$response.body#access_token'
+              description: >
+                The `access_token` value returned in the response can be used as
+                the `bearer token`.
+          # -----------------------------------------------------
+                  
+        '400':
+          $ref: '#/components/responses/bad_request'
+        '401':
+          $ref: '#/components/responses/unauthorized'
+        '405':
+          $ref: '#/components/responses/method_not_allowed'
+        '500':
+          $ref: '#/components/responses/internal_server_error'
+  /api/v1/fact/search:
+    summary: Request facts from XBRL filings based on search parameters.
+    get:
+      operationId: getFactDetails
+      tags: [Facts]
+      security:
+        - OAuth2: []
+        - bearerAuth: []
+      description: > 
+          Search for _XBRL facts_ based on the attributes of the fact, the report it was in, or the source of the data.  
+          
+          ## Examples
+          
+          ### _-Get all the facts in a document_
+          
+          
+          The following call will: get all facts in the report with an id of `226471`; limit the number of records returned to `1010` facts; sort facts `A-Z by the concept name`, and; return the following values:
+            * entity.name
+            * dimensions.count
+            * dimensions
+            * entity.cid
+            * period.fiscal-period
+            * period.end
+            * period.instant
+            * period.year
+            * concept.local-name.sort(ASC)
+            * fact.numerical-value,fact.limit(1010)
+            * fact.value,report.source-id
+            * footnote.text
+            * footnote.role
+          
+                  https://uat.eforms.ferc.gov/api/v1/fact/search?report.id=226471&fields=entity.name,dimensions.count,dimensions,entity.cid,period.fiscal-period,period.end,period.instant,period.year,concept.local-name.sort(ASC),fact.numerical-value,fact.limit(1010),fact.value,report.source-id,footnote.text,footnote.role
+            
+  
+          ### _-Get Operating Cash used by Pharma for the 2017 year_
+          
+          The following call will get all facts reported for the 2017 year using the concept  `NetCashProvidedByUsedInOperatingActivities` reported for the sic code  `3841` which have no dimensions. It also limits the records returned to `100` facts and will return the following values:
+            
+            * fact.numerical-value
+            * period.fiscal-year
+            * period.fiscal-period
+            
+                  https://uat.eforms.ferc.gov/api/v1/fact/search?period.fiscal-period=Y&fact.ultimus=true&report.year=2018&concept.local-name=NetCashProvidedByUsedInOperatingActivities&period.fiscal-year=2017&dimensions.count=0&fields=fact.numerical-value,period.fiscal-year,period.fiscal-period,fact.limit(100)
+          
+              
+          
+      parameters: 
+        - $ref: '#/components/parameters/concept.id_Param' 
+        - $ref: '#/components/parameters/concept.is-monetary_Param'
+        - $ref: '#/components/parameters/concept.local-name_Param'
+        - $ref: '#/components/parameters/concept.namespace_Param'
+        - $ref: '#/components/parameters/dimension.is-base_Param'
+        - $ref: '#/components/parameters/dimension.local-name_Param'
+        - $ref: '#/components/parameters/dimension.namespace_Param'
+        - $ref: '#/components/parameters/dimensions.count_Param'
+        - $ref: '#/components/parameters/dimensions.id_Param'
+        - $ref: '#/components/parameters/dts.entry-point_Param'
+        - $ref: '#/components/parameters/dts.id_Param'
+        - $ref: '#/components/parameters/dts.target-namespace_Param'
+        - $ref: '#/components/parameters/entity.cid_Param'
+        - $ref: '#/components/parameters/entity.id_Param'
+        - $ref: '#/components/parameters/fact.has-dimensions_Param'
+        - $ref: '#/components/parameters/fact.hash_Param'
+        - $ref: '#/components/parameters/fact.id_Param'
+        - $ref: '#/components/parameters/fact.is-extended_Param'
+        - $ref: '#/components/parameters/fact.ultimus_Param'
+        - $ref: '#/components/parameters/fact.ultimus-index_Param'
+        - $ref: '#/components/parameters/fact.value_Param'
+        - $ref: '#/components/parameters/member.is-base_Param'
+        - $ref: '#/components/parameters/member.local-name_Param'
+        - $ref: '#/components/parameters/member.namespace_Param'
+        - $ref: '#/components/parameters/period.calendar-period_Param'
+        - $ref: '#/components/parameters/period.fiscal-id_Param'
+        - $ref: '#/components/parameters/period.fiscal-period_Param'
+        - $ref: '#/components/parameters/period.fiscal-year_Param'
+        - $ref: '#/components/parameters/period.id_Param'
+        - $ref: '#/components/parameters/period.year_Param'
+        - $ref: '#/components/parameters/report.filing-id_Param'
+        - $ref: '#/components/parameters/report.creation-software_Param'
+        - $ref: '#/components/parameters/report.entry-url_Param'
+        - $ref: '#/components/parameters/report.id_Param'
+        - $ref: '#/components/parameters/report.restated_Param'
+        - $ref: '#/components/parameters/report.restated-index_Param'
+        - $ref: '#/components/parameters/report.cid_Param'
+        - $ref: '#/components/parameters/report.year_Param'
+        - $ref: '#/components/parameters/report.source-id_Param'
+        - $ref: '#/components/parameters/report.source-name_Param'
+        - $ref: '#/components/parameters/unit_Param'
+        - in: query
+          name: fields
+          required: true
+          style: form
+          explode: false
+          allowEmptyValue : false
+          schema:
+            $ref: '#/components/schemas/fact_fields'
+          description: This is the list of fields that can be returned for _XBRL facts_.
+          
+        # - in: query
+        #   name: aspect
+        #   # Wrap 'schema' into 'content.<media-type>'
+        #   content:
+        #     application/json:  # <---- media type indicates how to serialize / deserialize the parameter content
+        #       schema:
+        #         type: object
+        #         properties:
+        #           dimension:
+        #            type: string
+        #           member:
+        #            type: string
+          
+      responses:
+        '200':
+          description: __fact details__ successfully accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paging:
+                    $ref: '#/components/schemas/paging'
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/fact_details'
+          # -----------------------------------------------------
+          # Links
+          # -----------------------------------------------------
+          links:
+            GetfactId:   # <---- arbitrary name for the link
+              operationId: getFactBasedOnFactID
+              parameters:
+                fact.id: '$response.body#/data/fact.id'
+              description: >
+                The `fact.id` value returned in the response can be used as
+                the `factId` parameter in `/api/v1/fact/{fact.id}`.
+          # -----------------------------------------------------
+        '400':
+          $ref: '#/components/responses/bad_request'
+        '401':
+          $ref: '#/components/responses/bad_token'
+        '405':
+          $ref: '#/components/responses/method_not_allowed'
+        '500':
+          $ref: '#/components/responses/internal_server_error'
+          
+  /api/v1/fact/{fact.id}:
+    summary: Request fact detail from an XBRL filing based on its unique identifier. The fact ID is an internal ID used by the API.
+    get:
+      operationId: getFactBasedOnFactID
+      tags: [Facts]
+      security:
+        - OAuth2: []
+        - bearerAuth: []
+      description: >
+       Search for _XBRL facts_ based on the fact.id attribute of the fact.
+      parameters:
+        - name: fact.id
+          in: path
+          description: ID of the fact defined by the API.
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: fields
+          required: true
+          style: form
+          explode: false
+          schema:
+            $ref: '#/components/schemas/fact_fields'
+          description: This is the list of fields that can be returned for _XBRL facts_.  
+      responses:
+        '200':
+          description: __fact details__ successfully accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paging:
+                    $ref: '#/components/schemas/paging'
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/fact_details'
+        '400':
+          $ref: '#/components/responses/bad_request'
+        '401':
+          $ref: '#/components/responses/bad_token'
+        '405':
+          $ref: '#/components/responses/method_not_allowed'
+        '500':
+          $ref: '#/components/responses/internal_server_error'
+  /api/v1/fact/oim/search:
+    summary: Request facts from XBRL filings based on search parameters.
+    get:
+      operationId: getFactDetailsInOIMFormat
+      tags: [Facts]
+      security:
+        - bearerAuth: []
+      description: >
+        Returns _XBRL facts_ detail in the OIM JSON format.
+      parameters: 
+        - $ref: '#/components/parameters/concept.id_Param' 
+        - $ref: '#/components/parameters/concept.is-monetary_Param'
+        - $ref: '#/components/parameters/concept.local-name_Param'
+        - $ref: '#/components/parameters/concept.namespace_Param'
+        - $ref: '#/components/parameters/dimension.is-base_Param'
+        - $ref: '#/components/parameters/dimension.local-name_Param'
+        - $ref: '#/components/parameters/dimension.namespace_Param'
+        - $ref: '#/components/parameters/dimensions.count_Param'
+        - $ref: '#/components/parameters/dimensions.id_Param'
+        - $ref: '#/components/parameters/dts.entry-point_Param'
+        - $ref: '#/components/parameters/dts.id_Param'
+        - $ref: '#/components/parameters/dts.target-namespace_Param'
+        - $ref: '#/components/parameters/entity.cid_Param'
+        - $ref: '#/components/parameters/entity.id_Param'
+        - $ref: '#/components/parameters/fact.has-dimensions_Param'
+        - $ref: '#/components/parameters/fact.hash_Param'
+        - $ref: '#/components/parameters/fact.id_Param'
+        - $ref: '#/components/parameters/fact.is-extended_Param'
+        - $ref: '#/components/parameters/fact.ultimus_Param'
+        - $ref: '#/components/parameters/fact.ultimus-index_Param'
+        - $ref: '#/components/parameters/fact.value_Param'
+        - $ref: '#/components/parameters/member.is-base_Param'
+        - $ref: '#/components/parameters/member.local-name_Param'
+        - $ref: '#/components/parameters/member.namespace_Param'
+        - $ref: '#/components/parameters/period.calendar-period_Param'
+        - $ref: '#/components/parameters/period.fiscal-id_Param'
+        - $ref: '#/components/parameters/period.fiscal-period_Param'
+        - $ref: '#/components/parameters/period.fiscal-year_Param'
+        - $ref: '#/components/parameters/period.id_Param'
+        - $ref: '#/components/parameters/period.year_Param'
+        - $ref: '#/components/parameters/report.filing-id_Param'
+        - $ref: '#/components/parameters/report.creation-software_Param'
+        - $ref: '#/components/parameters/report.entry-url_Param'
+        - $ref: '#/components/parameters/report.id_Param'
+        - $ref: '#/components/parameters/report.restated_Param'
+        - $ref: '#/components/parameters/report.restated-index_Param'
+        - $ref: '#/components/parameters/report.cid_Param'
+        - $ref: '#/components/parameters/report.year_Param'
+        - $ref: '#/components/parameters/report.source-id_Param'
+        - $ref: '#/components/parameters/report.source-name_Param'
+        - $ref: '#/components/parameters/unit_Param'
+        
+      responses:
+        '200':
+          description: __fact details__ successfully accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documentInfo:
+                    $ref: '#/components/schemas/documentInfo_oim_json'
+                  facts:
+                      $ref: '#/components/schemas/facts_oim_json'
+        '400':
+          $ref: '#/components/responses/bad_request'
+        '401':
+          $ref: '#/components/responses/bad_token'
+        '405':
+          $ref: '#/components/responses/method_not_allowed'
+        '500':
+          $ref: '#/components/responses/internal_server_error'
+  /api/v1/report/search:
+      summary: Request report details from XBRL filings based on search parameters.
+      get:
+        operationId: getReportDetails
+        tags: [Reports]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Return details for _XBRL reports_ based on the attributes of the report(s).
+        parameters:
+          - $ref: '#/components/parameters/dts.id_Param'
+          - $ref: '#/components/parameters/entity.cid_Param'
+          - $ref: '#/components/parameters/entity.id_Param' 
+          - $ref: '#/components/parameters/report.filing-id_Param' 
+          - $ref: '#/components/parameters/report.form-type_Param'
+          - $ref: '#/components/parameters/report.entity-name_Param'
+          - $ref: '#/components/parameters/report.entry-type_Param'
+          - $ref: '#/components/parameters/report.entry-url_Param'
+          - $ref: '#/components/parameters/report.filer-category_Param'
+          - $ref: '#/components/parameters/report.id_Param'
+          - $ref: '#/components/parameters/report.is-most-current_Param'
+          - $ref: '#/components/parameters/report.period_Param'
+          - $ref: '#/components/parameters/report.period-index_Param'
+          - $ref: '#/components/parameters/report.restated_Param'
+          - $ref: '#/components/parameters/report.restated-index_Param'
+          - $ref: '#/components/parameters/report.cid_Param'
+          - $ref: '#/components/parameters/report.year_Param'
+          - $ref: '#/components/parameters/report.source-id_Param'
+          - $ref: '#/components/parameters/report.source-name_Param'
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+              $ref: '#/components/schemas/report_fields'
+            description: This is the list of fields that can be returned for _XBRL reports_.
+          
+          
+        responses:
+          '200':
+            description: __report details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/report_details'
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+  /api/v1/report/{report.id}:
+      summary: Request a report from XBRL filings based on unique report identifier. The report ID is an internal ID used by the API.
+      get:
+        operationId: getReportDetailsById
+        tags: [Reports]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Return detail for an _XBRL report_ based on the report.id attribute.
+        parameters:
+          - name: report.id
+            in: path
+            description: ID of the report defined by the API.
+            required: true
+            schema:
+              type: integer
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+              $ref: '#/components/schemas/report_fields'
+            description: This is the list of fields that can be returned for _XBRL reports_.
+        responses:
+          '200':
+            description: __report details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/report_details'
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+  
+  /api/v1/report/{report.id}/fact/search:
+    summary: Request facts from XBRL filings based on specified report.id and fact parameters.
+    get:
+      operationId: getReportFactDetailsById
+      tags: [Reports]
+      security:
+        - bearerAuth: []
+      description: >
+        Allows searching for _XBRL reports_ based on the report.id and returns certain _XBRL facts_ associated with that report.  The attributes of those facts can be used as search parameters.
+      parameters:
+        - name: report.id
+          in: path
+          description: ID of the report defined by the API.
+          required: true
+          schema:
+            type: integer
+        - $ref: '#/components/parameters/concept.id_Param' 
+        - $ref: '#/components/parameters/concept.is-monetary_Param'
+        - $ref: '#/components/parameters/concept.local-name_Param'
+        - $ref: '#/components/parameters/concept.namespace_Param'
+        - $ref: '#/components/parameters/dimension.is-base_Param'
+        - $ref: '#/components/parameters/dimension.local-name_Param'
+        - $ref: '#/components/parameters/dimension.namespace_Param'
+        - $ref: '#/components/parameters/dimensions.count_Param'
+        - $ref: '#/components/parameters/dimensions.id_Param'
+        - $ref: '#/components/parameters/dts.entry-point_Param'
+        - $ref: '#/components/parameters/dts.id_Param'
+        - $ref: '#/components/parameters/dts.target-namespace_Param'
+        - $ref: '#/components/parameters/entity.cid_Param'
+        - $ref: '#/components/parameters/entity.id_Param'
+        - $ref: '#/components/parameters/fact.has-dimensions_Param'
+        - $ref: '#/components/parameters/fact.hash_Param'
+        - $ref: '#/components/parameters/fact.id_Param'
+        - $ref: '#/components/parameters/fact.is-extended_Param'
+        - $ref: '#/components/parameters/fact.ultimus_Param'
+        - $ref: '#/components/parameters/fact.ultimus-index_Param'
+        - $ref: '#/components/parameters/fact.value_Param'
+        - $ref: '#/components/parameters/member.is-base_Param'
+        - $ref: '#/components/parameters/member.local-name_Param'
+        - $ref: '#/components/parameters/member.namespace_Param'
+        - $ref: '#/components/parameters/period.calendar-period_Param'
+        - $ref: '#/components/parameters/period.fiscal-id_Param'
+        - $ref: '#/components/parameters/period.fiscal-period_Param'
+        - $ref: '#/components/parameters/period.fiscal-year_Param'
+        - $ref: '#/components/parameters/period.id_Param'
+        - $ref: '#/components/parameters/period.year_Param'
+        - $ref: '#/components/parameters/report.filing-id_Param'
+        - $ref: '#/components/parameters/report.creation-software_Param'
+        - $ref: '#/components/parameters/report.entry-url_Param'
+        - $ref: '#/components/parameters/report.id_Param'
+        - $ref: '#/components/parameters/report.restated_Param'
+        - $ref: '#/components/parameters/report.restated-index_Param'
+        - $ref: '#/components/parameters/report.cid_Param'
+        - $ref: '#/components/parameters/report.year_Param'
+        - $ref: '#/components/parameters/report.source-id_Param'
+        - $ref: '#/components/parameters/report.source-name_Param'
+        - $ref: '#/components/parameters/unit_Param'
+        - in: query
+          name: fields
+          required: true
+          style: form
+          explode: false
+          allowEmptyValue : false
+          schema:
+            $ref: '#/components/schemas/report_and_fact_fields'
+            
+          description: Report *and* fact fields can be returned by a nested report/fact query.
+      responses:
+        '200':
+          description: __report details__ successfully accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paging:
+                    $ref: '#/components/schemas/paging'
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/report_details_with_facts'
+        '400':
+          $ref: '#/components/responses/bad_request'
+        '401':
+          $ref: '#/components/responses/bad_token'
+        '405':
+          $ref: '#/components/responses/method_not_allowed'
+        '500':
+          $ref: '#/components/responses/internal_server_error'
+  /api/v1/report/fact/search:
+    summary: Request reports and facts from XBRL filings based on report and fact parameters.
+    get:
+      operationId: getReportFactDetailsBySearch
+      tags: [Reports]
+      security:
+        - OAuth2: []
+        - bearerAuth: []
+      description: >
+        Allows searching for _XBRL reports_ based on valid report search parameters and returns certain _XBRL facts_ associated with qualified reports.  The attributes of those facts can be used as search parameters.
+      parameters:
+        - $ref: '#/components/parameters/concept.id_Param' 
+        - $ref: '#/components/parameters/concept.is-monetary_Param'
+        - $ref: '#/components/parameters/concept.local-name_Param'
+        - $ref: '#/components/parameters/concept.namespace_Param'
+        - $ref: '#/components/parameters/dimension.is-base_Param'
+        - $ref: '#/components/parameters/dimension.local-name_Param'
+        - $ref: '#/components/parameters/dimension.namespace_Param'
+        - $ref: '#/components/parameters/dimensions.id_Param'
+        - $ref: '#/components/parameters/dts.entry-point_Param'
+        - $ref: '#/components/parameters/dts.id_Param'
+        - $ref: '#/components/parameters/dts.target-namespace_Param'
+        - $ref: '#/components/parameters/entity.cid_Param'
+        - $ref: '#/components/parameters/entity.id_Param'
+        - $ref: '#/components/parameters/fact.has-dimensions_Param'
+        - $ref: '#/components/parameters/fact.hash_Param'
+        - $ref: '#/components/parameters/fact.id_Param'
+        - $ref: '#/components/parameters/fact.is-extended_Param'
+        - $ref: '#/components/parameters/fact.ultimus-index_Param'
+        - $ref: '#/components/parameters/fact.ultimus_Param'
+        - $ref: '#/components/parameters/fact.value_Param'
+        - $ref: '#/components/parameters/member.is-base_Param'
+        - $ref: '#/components/parameters/member.local-name_Param'
+        - $ref: '#/components/parameters/member.namespace_Param'
+        - $ref: '#/components/parameters/period.calendar-period_Param'
+        - $ref: '#/components/parameters/period.fiscal-id_Param'
+        - $ref: '#/components/parameters/period.fiscal-period_Param'
+        - $ref: '#/components/parameters/period.fiscal-year_Param'
+        - $ref: '#/components/parameters/period.id_Param'
+        - $ref: '#/components/parameters/period.year_Param'
+        - $ref: '#/components/parameters/report.filing-id_Param'
+        - $ref: '#/components/parameters/report.creation-software_Param'
+        - $ref: '#/components/parameters/report.form-type_Param'
+        - $ref: '#/components/parameters/report.entity-name_Param'
+        - $ref: '#/components/parameters/report.entry-type_Param'
+        - $ref: '#/components/parameters/report.entry-url_Param'
+        - $ref: '#/components/parameters/report.filer-category_Param'
+        - $ref: '#/components/parameters/report.id_Param'
+        - $ref: '#/components/parameters/report.is-most-current_Param'
+        - $ref: '#/components/parameters/report.period_Param'
+        - $ref: '#/components/parameters/report.period-index_Param'
+        - $ref: '#/components/parameters/report.restated-index_Param'
+        - $ref: '#/components/parameters/report.restated_Param'
+        - $ref: '#/components/parameters/report.cid_Param'
+        - $ref: '#/components/parameters/report.year_Param'
+        - $ref: '#/components/parameters/report.source-id_Param'
+        - $ref: '#/components/parameters/report.source-name_Param'
+        - $ref: '#/components/parameters/unit_Param'
+        - in: query
+          name: fields
+          required: true
+          style: form
+          explode: false
+          allowEmptyValue : false
+          schema:
+            $ref: '#/components/schemas/report_details_with_facts'
+            
+          description: Report *and* fact fields can be returned by a nested report/fact query.
+      responses:
+        '200':
+          description: __report details__ successfully accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paging:
+                    $ref: '#/components/schemas/paging'
+                  data:
+                    type: array
+                    items:
+                       $ref: '#/components/schemas/report_details_with_facts'
+        '400':
+          $ref: '#/components/responses/bad_request'
+        '401':
+          $ref: '#/components/responses/bad_token'
+        '405':
+          $ref: '#/components/responses/method_not_allowed'
+        '500':
+          $ref: '#/components/responses/internal_server_error'
+      
+  /api/v1/entity/{entity.id}/report/search:
+      summary: Request report information based on the entity identifier. The entity ID is an internal ID used by the API.
+      get:
+        operationId: getEntityReportDetailsBasedOnID
+        tags: [Entity]
+        security:
+          - bearerAuth: []
+        description: >
+          Search for _XBRL reports_ based on the entity identifier associated with the reporting entity. Get entity and report information for the known entity. 
+        parameters:
+          - name: entity.id
+            in: path
+            description: ID of the entity defined by the API.
+            required: true
+            schema:
+              type: integer
+
+          - $ref: '#/components/parameters/report.source-id_Param'
+          - $ref: '#/components/parameters/report.source-name_Param'
+          - $ref: '#/components/parameters/report.filing-id_Param'
+          - $ref: '#/components/parameters/report.id_Param'
+          - $ref: '#/components/parameters/report.form-type_Param'
+          - $ref: '#/components/parameters/report.entry-type_Param'
+          - $ref: '#/components/parameters/report.entry-url_Param'
+          - $ref: '#/components/parameters/report.filer-category_Param'
+          - $ref: '#/components/parameters/report.is-most-current_Param'
+          - $ref: '#/components/parameters/report.period_Param'
+          - $ref: '#/components/parameters/report.period-index_Param'
+          - $ref: '#/components/parameters/report.restated_Param'
+          - $ref: '#/components/parameters/report.restated-index_Param'
+          - $ref: '#/components/parameters/report.cid_Param'
+          - $ref: '#/components/parameters/report.year_Param'
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+              $ref: '#/components/schemas/entity_fields'
+            description: Entity *and* report fields can be returned by a nested entity/report query.
+          
+          
+        responses:
+          '200':
+            description: __entity report details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/entity_details'
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+  
+  /api/v1/entity/report/search:
+      summary: Request entity *and* report details from XBRL filings based on search parameters.
+      get:
+        operationId: getEntityReportDetails
+        tags: [Entity]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search _XBRL reports_ grouped by the entity that filed the reports. The API allows searching on the attributes of the entity and the report.
+        parameters:
+          - $ref: '#/components/parameters/entity.cid_Param'
+          - $ref: '#/components/parameters/entity.id_Param'
+          - $ref: '#/components/parameters/report.entity-name_Param'
+          - $ref: '#/components/parameters/report.source-id_Param'
+          - $ref: '#/components/parameters/report.source-name_Param'
+          - $ref: '#/components/parameters/report.filing-id_Param'
+          - $ref: '#/components/parameters/report.id_Param'
+          - $ref: '#/components/parameters/report.form-type_Param'
+          - $ref: '#/components/parameters/report.entry-type_Param'
+          - $ref: '#/components/parameters/report.entry-url_Param'
+          - $ref: '#/components/parameters/report.filer-category_Param'
+          - $ref: '#/components/parameters/report.is-most-current_Param'
+          - $ref: '#/components/parameters/report.period_Param'
+          - $ref: '#/components/parameters/report.period-index_Param'
+          - $ref: '#/components/parameters/report.restated_Param'
+          - $ref: '#/components/parameters/report.restated-index_Param'
+          - $ref: '#/components/parameters/report.cid_Param'
+          - $ref: '#/components/parameters/report.year_Param'
+         
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+              $ref: '#/components/schemas/entity_fields'
+            description: Entity *and* report fields can be returned by a nested entity/report query.
+          
+          
+        responses:
+          '200':
+            description: __entity report details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/entity_details'
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+            
+  /api/v1/entity/{entity.id}:
+      summary: Request entity information based on the entity identifier. The entity ID is an internal ID used by the API.
+      get:
+        operationId: getEntityDetailsBasedOnID
+        tags: [Entity]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Allows searching for _XBRL entities_ based on the entity identifier associated with the reporting entity. Use this to get CID information quickly with a known entity.id.
+        parameters:
+          - name: entity.id
+            in: path
+            description: ID of the entity defined by the API.
+            required: true
+            schema:
+              type: integer
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+              $ref: '#/components/schemas/entity_only_fields'
+            description: This is the list of fields that can be returned for _XBRL entities_.
+          
+          
+        responses:
+          '200':
+            description: __entity report details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/entity_details'
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+
+            
+  /api/v1/dts/search:
+      summary: Used to search discoverable taxonomy sets (dts) or taxonomies used in filings.  The DTS ID is an internal id used by the API that refers to the taxonomy schema of a filing.
+      get:
+        operationId: getDTSDetails
+        tags: [DTS]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for a _XBRL discoverable taxonomy set (DTS)_ based on taxonomy name, entry point, hash, etc.
+        parameters:
+          - $ref: '#/components/parameters/dts.entry-point_Param' 
+          - $ref: '#/components/parameters/dts.hash_Param'
+          - $ref: '#/components/parameters/dts.id_Param'
+          - $ref: '#/components/parameters/dts.taxonomy_Param'
+          - $ref: '#/components/parameters/dts.taxonomy-name_Param'
+          - $ref: '#/components/parameters/dts.version_Param'
+          - $ref: '#/components/parameters/report.filing-id_Param'
+          - $ref: '#/components/parameters/report.id_Param'
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/dts_fields' 
+          
+        responses:
+          '200':
+            description: __concept details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/dts_details'
+                        
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+  
+  /api/v1/dts/{dts.id}/concept/search:
+      summary: Request concept details from an XBRL filing for a specified dts.id.
+      get:
+        operationId: getConceptDetailsByDTS
+        tags: [DTS]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for _XBRL concepts_ in a specific DTS.
+        parameters:
+          - name: dts.id
+            in: path
+            required: true
+            schema:
+              type: integer
+            description: The DTS ID for a given group of taxonomies. XBRL facts and linkbases are typically associated with a given report that is asscociated with a dts.
+            example: 321964
+          - $ref: '#/components/parameters/concept.id_Param' 
+          - $ref: '#/components/parameters/concept.local-name_Param'
+          - $ref: '#/components/parameters/concept.namespace_Param'
+          - $ref: '#/components/parameters/dts.entry-point_Param'
+          - $ref: '#/components/parameters/dts.hash_Param'
+          - $ref: '#/components/parameters/dts.target-namespace_Param'
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/concept_fields' 
+          
+        responses:
+          '200':
+            description: __concept details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/concept_details'
+                        
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+            
+  /api/v1/dts/{dts.id}/concept/{concept.local-name}:
+      summary: Request concepts from an XBRL filing based on specified dts.id and concept.local-name parameters.
+      get:
+        operationId: getConceptDetailsByDTSAndLocalName
+        tags: [DTS]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for _XBRL concept_ details based on specific dts.id and concept.local-name parameters. The returned attributes of the DTS and concept can be used as search parameters.
+        parameters:
+          - name: dts.id
+            in: path
+            required: true
+            schema:
+              type: integer
+            description: The DTS identifier for a given group of taxonomies. XBRL facts and linkbases are typically associated with a given report that is asscociated with a dts.
+            example: 321964
+          - name: concept.local-name
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The concept name in the base schema of a taxonomy exluding the namespace, such as Assets or Liabilities. Use this to search across multiple taxonomies where the local name is known to be consistent over time.
+            example: Assets  
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/concept_fields' 
+          
+        responses:
+          '200':
+            description: __concept details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/concept_details'
+                        
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+                  
+  /api/v1/dts/{dts.id}/concept/{concept.local-name}/label:
+      summary: Request label details from an XBRL filing based on specified dts.id and concept.local-name parameters. The returned attributes of the DTS, concept and label can be used as search parameters.
+      get:
+        operationId: getLabelDetailsByDTSAndLocalName
+        tags: [DTS]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for _XBRL label_ information for a given _XBRL concept_ in a specific DTS.
+        parameters:
+          - name: dts.id
+            in: path
+            required: true
+            schema:
+              type: integer
+            description: The DTS identifier for a given group of taxonomies. XBRL facts and linkbases are typically associated with a given report that is asscociated with a dts.
+            example: 321964
+          - name: concept.local-name
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The concept name in the base schema of a taxonomy exluding the namespace, such as Assets or Liabilities. Use this to search across multiple taxonomies where the local name is known to be consistent over time.
+            example: Assets  
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/label_fields' 
+          
+        responses:
+          '200':
+            description: __concept details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/label_details_search'
+                        
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'          
+  
+  /api/v1/dts/{dts.id}/concept/{concept.local-name}/reference:
+      summary: Request reference details from an XBRL filing based on specified dts.id and concept.local-name parameters. The returned attributes of the DTS, concept and reference can be used as search parameters.
+      get:
+        operationId: getReferenceDetailsByDTSAndLocalName
+        tags: [DTS]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for _XBRL references_ of a given _XBRL concept_ for a specific DTS.
+        parameters:
+          - name: dts.id
+            in: path
+            required: true
+            schema:
+              type: integer
+            description: The DTS identifier for a given group of taxonomies. XBRL facts and linkbases are typically associated with a given report that is asscociated with a dts.
+            example: 321964
+          - name: concept.local-name
+            in: path
+            required: true
+            schema:
+              type: string
+            description: The concept name in the base schema of a taxonomy exluding the namespace, such as Assets or Liabilities. Use this to search across multiple taxonomies where the local name is known to be consistent over time.
+            example: Assets  
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/reference_fields' 
+          
+        responses:
+          '200':
+            description: __concept details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/reference_concept_details'
+                        
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'              
+            
+  /api/v1/dts/{dts.id}/network:
+      summary: Request network details from XBRL filings based on a specified dts.id.
+      get:
+        operationId: getNetworkDetailsByDTS
+        tags: [DTS]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Request _XBRL network_ and _XBRL relationship_ information for a specific DTS.
+        parameters:
+          - name: dts.id
+            in: path
+            required: true
+            schema:
+              type: integer
+            description: The DTS identifier for a given group of taxonomies. XBRL facts and linkbases are typically associated with a given report that is asscociated with a dts.
+            example: 321964
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/network_con_relationship_fields' 
+          
+        responses:
+          '200':
+            description: __concept details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/network_details'
+                        
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+            
+  /api/v1/dts/{dts.id}/network/search:
+      summary: Request network and relationship details from an XBRL filing based on specified dts.id and network parameters. The returned attributes of the DTS, network and relationship can be used as search parameters.
+      get:
+        operationId: getNetworkDetailsWithSearchByDTS
+        tags: [DTS]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for _XBRL relationship_ details within the _XBRL networks_ of a specific DTS.
+        parameters:
+          - name: dts.id
+            in: path
+            required: true
+            schema:
+              type: integer
+            description: The DTS identifier for a given group of taxonomies. XBRL facts and linkbases are typically associated with a given report that is asscociated with a dts.
+            example: 321964
+          - $ref: '#/components/parameters/network.id_Param' 
+          - $ref: '#/components/parameters/network.role-uri_Param'
+          - $ref: '#/components/parameters/network.arcrole-uri_Param'
+          - $ref: '#/components/parameters/network.link-name_Param'
+          - $ref: '#/components/parameters/relationship.id_Param'
+          - $ref: '#/components/parameters/relationship.order_Param'
+          - $ref: '#/components/parameters/relationship.preferred-label_Param'
+          - $ref: '#/components/parameters/relationship.source-concept-id_Param'
+          - $ref: '#/components/parameters/relationship.source-name_Param'
+          - $ref: '#/components/parameters/relationship.source-namespace_Param'
+          - $ref: '#/components/parameters/relationship.target-concept-id_Param'
+          - $ref: '#/components/parameters/relationship.target-name_Param'
+          - $ref: '#/components/parameters/relationship.target-namespace_Param'
+          - $ref: '#/components/parameters/relationship.tree-depth_Param'
+          - $ref: '#/components/parameters/relationship.tree-sequence_Param'
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/network_con_relationship_fields' 
+          
+        responses:
+          '200':
+            description: __concept details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/network_details'
+                        
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+  
+  /api/v1/concept/search:
+      summary: Request concept details based on specified parameters.
+      get:
+        operationId: getConceptDetails
+        tags: [Concepts]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for _XBRL concept_ details for a given DTS, or across a set of taxonomies. If searching for concept details it highly recomended that a DTS identifier is used to limit the concept search, *especially when returning label data*. For example, if _no DTS is presribed_ and the details of Assets are requested, the API will attempt to return _all the labels used for Assets in every single filing made_.
+        parameters:
+          - $ref: '#/components/parameters/concept.id_Param' 
+          - $ref: '#/components/parameters/concept.local-name_Param'
+          - $ref: '#/components/parameters/concept.namespace_Param'
+          - $ref: '#/components/parameters/dts.entry-point_Param'
+          - $ref: '#/components/parameters/dts.hash_Param'
+          - $ref: '#/components/parameters/dts.id_Param'
+          - $ref: '#/components/parameters/dts.target-namespace_Param'
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/concept_fields' 
+          
+        responses:
+          '200':
+            description: __concept details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/concept_details'
+                        
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+            
+  /api/v1/concept/{concept.local-name}/search:
+      summary: Request concept details based on specified concept.
+      get:
+        operationId: getConceptDetailsByName
+        tags: [Concepts]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Allows searching for _XBRL concept_ details in _XBRL reports_.
+        parameters:
+          - name: concept.local-name
+            in: path
+            description: The concept name in the base schema of a taxonomy exluding the namespace, such as Assets or Liabilities. Use this to search across multiple taxonomies where the local name is known to be consistent over time.
+            required: true
+            schema:
+              type: string
+          - $ref: '#/components/parameters/concept.id_Param' 
+          - $ref: '#/components/parameters/concept.local-name_Param'
+          - $ref: '#/components/parameters/concept.namespace_Param'
+          - $ref: '#/components/parameters/dts.entry-point_Param'
+          - $ref: '#/components/parameters/dts.hash_Param'
+          - $ref: '#/components/parameters/dts.id_Param'
+          - $ref: '#/components/parameters/dts.target-namespace_Param'
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/concept_fields' 
+                
+            description: This is the list of fields that can be returned for _XBRL concepts_.
+          
+        responses:
+          '200':
+            description: __concept details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/concept_details'
+                        
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+            
+  /api/v1/label/{dts.id}/search:
+      summary: Request label details based on specified dts.id.
+      get:
+        operationId: getlabelsBasedOnDTS
+        tags: [Labels]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for _XBRL label_ details in a specific _XBRL report_.
+        parameters:
+          - name: dts.id
+            in: path
+            required: true
+            schema:
+              type: integer
+            description: The DTS identifier for a given group of taxonomies. XBRL facts and linkbases are typically associated with a given report that is asscociated with a dts.
+            example: 321964
+          - $ref: '#/components/parameters/label.text_Param'
+          - $ref: '#/components/parameters/label.role_Param' 
+          - $ref: '#/components/parameters/concept.id_Param' 
+          - $ref: '#/components/parameters/concept.local-name_Param'
+          - $ref: '#/components/parameters/dts.entry-point_Param'
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/label_fields' 
+                
+            description: This is the list of fields that can be returned for _XBRL labels_.
+          
+        responses:
+          '200':
+            description: __concept details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/label_details_search'
+                        
+                          
+                        
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+            
+  /api/v1/label/search:
+      summary: Request label details based on specified parameters.
+      get:
+        operationId: getlabels
+        tags: [Labels]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for _XBRL label_ details in _XBRL reports_.
+        parameters:
+          - name: dts.id
+            in: path
+            required: true
+            schema:
+              type: integer
+            description: The DTS identifier for a given group of taxonomies. XBRL facts and linkbases are typically associated with a given report that is asscociated with a dts.
+            example: 321964
+          - $ref: '#/components/parameters/label.text_Param'
+          - $ref: '#/components/parameters/label.role_Param' 
+          - $ref: '#/components/parameters/concept.id_Param' 
+          - $ref: '#/components/parameters/concept.local-name_Param'
+          - $ref: '#/components/parameters/dts.entry-point_Param'
+          - $ref: '#/components/parameters/dts.id_Param'
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/label_fields' 
+                
+            description: This is the list of fields that can be returned for _XBRL labels_.
+          
+        responses:
+          '200':
+            description: __label details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/label_details_search'
+                     
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+            
+  /api/v1/network/{network.id}/relationship/search:
+      summary: Request relationship details from an XBRL filing based on specified network.id. The network ID is an internal ID used by the API. The returned attributes of the network and relationship can be used as search parameters.
+      get:
+        operationId: getNetworkRelationships
+        tags: [Networks]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search all chracteristics of _XBRL relationships_ in a specific _XBRL network_ and filter results based on charateristics of the _XBRL relationships_ in the _XBRL network_. 
+        parameters:
+          - name: network.id
+            in: path
+            required: true
+            schema:
+              type: integer
+            description: Unique identifier used to identify a specific network. A different identifier is used for networks with the same role but different linkbase types.
+            example: 27624452
+          - $ref: '#/components/parameters/dts.entry-point_Param'
+          - $ref: '#/components/parameters/dts.id_Param'
+          - $ref: '#/components/parameters/network.arcrole-uri_Param'
+          - $ref: '#/components/parameters/network.id_Param'
+          - $ref: '#/components/parameters/network.link-name_Param'
+          - $ref: '#/components/parameters/network.role-description_Param'
+          - $ref: '#/components/parameters/network.role-uri_Param'
+          - $ref: '#/components/parameters/relationship.id_Param'
+          - $ref: '#/components/parameters/relationship.order_Param'
+          - $ref: '#/components/parameters/relationship.preferred-label_Param'
+          - $ref: '#/components/parameters/relationship.source-concept-id_Param'
+          - $ref: '#/components/parameters/relationship.source-name_Param'
+          - $ref: '#/components/parameters/relationship.source-namespace_Param'
+          - $ref: '#/components/parameters/relationship.target-concept-id_Param'
+          - $ref: '#/components/parameters/relationship.target-name_Param'
+          - $ref: '#/components/parameters/relationship.target-namespace_Param'
+          - $ref: '#/components/parameters/relationship.tree-depth_Param'
+          - $ref: '#/components/parameters/relationship.tree-sequence_Param'
+          
+          
+          - in: query
+            name: fields
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/network_con_relationship_fields' 
+                
+            description: DTS, network *and* relationship fields can be returned by a nested network/relationship query.
+          
+        responses:
+          '200':
+            description: __network details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/network_details'
+                     
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+            
+  /api/v1/network/relationship/search:
+      summary: Request network and relationship details from XBRL filings based on search parameters.
+      get:
+        operationId: getNetworkRelationshipsNoID
+        tags: [Networks]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for a specific _XBRL network_ based on _XBRL network_ and _XBRL relationship_ chracteristics.
+        parameters:
+          - $ref: '#/components/parameters/dts.entry-point_Param'
+          - $ref: '#/components/parameters/dts.id_Param'
+          - $ref: '#/components/parameters/network.arcrole-uri_Param'
+          - $ref: '#/components/parameters/network.id_Param'
+          - $ref: '#/components/parameters/network.link-name_Param'
+          - $ref: '#/components/parameters/network.role-description_Param'
+          - $ref: '#/components/parameters/network.role-uri_Param'
+          - $ref: '#/components/parameters/relationship.id_Param'
+          - $ref: '#/components/parameters/relationship.order_Param'
+          - $ref: '#/components/parameters/relationship.preferred-label_Param'
+          - $ref: '#/components/parameters/relationship.source-concept-id_Param'
+          - $ref: '#/components/parameters/relationship.source-name_Param'
+          - $ref: '#/components/parameters/relationship.source-namespace_Param'
+          - $ref: '#/components/parameters/relationship.target-concept-id_Param'
+          - $ref: '#/components/parameters/relationship.target-name_Param'
+          - $ref: '#/components/parameters/relationship.target-namespace_Param'
+          - $ref: '#/components/parameters/relationship.tree-depth_Param'
+          - $ref: '#/components/parameters/relationship.tree-sequence_Param'
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/network_con_relationship_fields' 
+                
+            description: DTS, network *and* relationship fields can be returned by a nested network/relationship query.
+          
+        responses:
+          '200':
+            description: __network details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/network_details'
+                     
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+            
+  /api/v1/network/{network.id}:
+      summary: Request networks details from an XBRL filing based on a specified network ID. The network ID is an internal id used by the API.
+      get:
+        operationId: getNetworkOnID
+        tags: [Networks]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Returns the characteristics of a specific _XBRL network_. This does __not__ include the _XBRL relationships_. Use the endpoint /api/v1/network/{network.id}/relationship/search to get relationship information about the network.
+        parameters:
+          - name: network.id
+            in: path
+            required: true
+            schema:
+              type: integer
+            description: Unique identifier used to identify a specific network. A different identifier is used for networks with the same role but different linkbase types.
+            example: 27624452
+          
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/network_fields' 
+                
+            description: This is the list of network fields that can be returned by the query.
+          
+        responses:
+          '200':
+            description: __network details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/network_only_details'
+                     
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'
+  
+  /api/v1/relationship/search:
+      summary: Request network and relationship detail from XBRL filings based on search parameters.
+      get:
+        operationId: getRelationships
+        tags: [Relationships]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search for a specific set of _XBRL relationships_ based on characteristics of the relationship.
+        parameters:
+          - $ref: '#/components/parameters/dts.id_Param'
+          - $ref: '#/components/parameters/network.arcrole-uri_Param'
+          - $ref: '#/components/parameters/network.id_Param'
+          - $ref: '#/components/parameters/network.link-name_Param'
+          - $ref: '#/components/parameters/network.role-description_Param'
+          - $ref: '#/components/parameters/network.role-uri_Param'
+          - $ref: '#/components/parameters/relationship.id_Param'
+          - $ref: '#/components/parameters/relationship.order_Param'
+          - $ref: '#/components/parameters/relationship.preferred-label_Param'
+          - $ref: '#/components/parameters/relationship.source-concept-id_Param'
+          - $ref: '#/components/parameters/relationship.source-name_Param'
+          - $ref: '#/components/parameters/relationship.source-namespace_Param'
+          - $ref: '#/components/parameters/relationship.target-concept-id_Param'
+          - $ref: '#/components/parameters/relationship.target-is-abstract_Param'
+          - $ref: '#/components/parameters/relationship.target-name_Param'
+          - $ref: '#/components/parameters/relationship.target-namespace_Param'
+          - $ref: '#/components/parameters/relationship.tree-depth_Param'
+          - $ref: '#/components/parameters/relationship.tree-sequence_Param'
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/relationship_fields' 
+                
+            description: This is the list of dts, network and relationship fields that can be returned by the query.
+          
+        responses:
+          '200':
+            description: __network details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/relationship_details_search'
+                     
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'     
+            
+  /api/v1/relationship/tree/search:
+      summary: Request networks and relationships from XBRL filings based on search parameters.
+      get:
+        operationId: getRelationshipsAsTree
+        tags: [Relationships]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search a specific set of _XBRL relationships_ based on characteristics of the relationship and returning the data as a tree in different formats.
+        parameters:
+          - $ref: '#/components/parameters/dts.id_Param'
+          - $ref: '#/components/parameters/network.arcrole-uri_Param'
+          - $ref: '#/components/parameters/network.id_Param'
+          - $ref: '#/components/parameters/network.link-name_Param'
+          - $ref: '#/components/parameters/network.role-description_Param'
+          - $ref: '#/components/parameters/network.role-uri_Param'
+          # - $ref: '#/components/parameters/relationship.id_Param'
+          # - $ref: '#/components/parameters/relationship.order_Param'
+          # - $ref: '#/components/parameters/relationship.preferred-label_Param'
+          # - $ref: '#/components/parameters/relationship.source-concept-id_Param'
+          # - $ref: '#/components/parameters/relationship.source-name_Param'
+          # - $ref: '#/components/parameters/relationship.source-namespace_Param'
+          # - $ref: '#/components/parameters/relationship.target-concept-id_Param'
+          # - $ref: '#/components/parameters/relationship.target-name_Param'
+          # - $ref: '#/components/parameters/relationship.target-namespace_Param'
+          # - $ref: '#/components/parameters/relationship.tree-depth_Param'
+          # - $ref: '#/components/parameters/relationship.tree-sequence_Param'
+          - in: query
+            name: format
+            schema:
+                type: string
+                enum: [flat,fancytree,standard] 
+            example: standard
+            description: >
+                Allows the list of _XBRL relationships_ to be returned in a tree format or be flat. Select from the following
+                  * flat: Returns a list of relationship pairs. 
+                  * standard: Returns as a standard tree. (No paging data is returned)
+                  * fancytree: Returns a network tree in the format for the `fancytree javasript format`. (No paging data is returned so that the results can go straight into a fancy tree object)
+                
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/relationship_fields' 
+                
+            description: DTS, network *and* relationship fields can be returned from a nested relationship/tree query.
+          
+        responses:
+          '200':
+            description: __network details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/relationship_details_search'
+                     
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'          
+  
+  /api/v1/document/search:
+      summary: Request document details from XBRL filings based on search parameters.
+      get:
+        operationId: getDocumentInfo
+        tags: [Documents]
+        security:
+          - OAuth2: []
+          - bearerAuth: []
+        description: >
+          Search _XBRL documents_ and their content.
+        parameters:
+          - $ref: '#/components/parameters/document.top-level_Param'
+          - $ref: '#/components/parameters/document.uri_Param'
+          - $ref: '#/components/parameters/dts.id_Param'
+          
+          - in: query
+            name: fields
+            required: true
+            style: form
+            explode: false
+            allowEmptyValue : false
+            schema:
+                 $ref: '#/components/schemas/document_fields' 
+                
+            description: |
+                List of fields to return. 
+                Available fields are as follows: 
+                  * document.top-level
+                  * document.tree-level
+                  * document.tree-order
+                  * document.type
+                  * document.uri
+                  * dts.id
+                  * document.*
+                
+                To limit the values returned use document._limit(n)_
+                
+                To sort on a field use the field folled by .sort. For example to sort in ascending order for document.uri then enter document.uri._sort(ASC)_ as a return field.
+          
+        responses:
+          '200':
+            description: __network details__ successfully accepted
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    paging:
+                      $ref: '#/components/schemas/paging'
+                    data:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/document_details'
+                     
+          '400':
+            $ref: '#/components/responses/bad_request'
+          '401':
+            $ref: '#/components/responses/bad_token'
+          '405':
+            $ref: '#/components/responses/method_not_allowed'
+          '500':
+            $ref: '#/components/responses/internal_server_error'   
+                               
+components:
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      flows:
+        password:
+          tokenUrl: /oauth2/token
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    
+  schemas:
+    authorization_grant:
+      type: object
+      required: [grant_type, client_id, client_secret]
+      properties:
+        grant_type:
+          type: string
+          example: password
+          description: >
+            Used to identify which credentials the authorization server needs to check
+              * **client_credentials** - Requires a client_id and client_secret only
+              * **password** - Requires a username and password as well as client_id and client_secret
+        client_id:
+          type: string
+          example: XBRL US
+          description: Unique identifier agreed upon by **XBRL US** and the 3rd party client
+        client_secret:
+          type: string
+          example: xhOEnAX2M...gaIYLXOvCe25Q
+          format: byte
+          description: Base64 key used to authenticate the 3rd party client
+        username:
+          type: string
+          example: joe90@WorldIntelligenceNetwork.org
+          description: Unique identifier for a given user
+        password:
+          type: string
+          format: password
+          example: someSecurePassword
+          description: Password used to authenticate the 3rd party user
+        platform:
+          type: string
+          example: github
+          description: Identifies the platform that is requesting the token (i.e. <YourProgramName>)
+    error_message:
+      type: object
+      properties:
+        errors:
+          type: string
+          description: Identifier for the error
+        error_description:
+          type: string
+          description: Adds more details to the error
+    paging:
+      type: object
+      properties: 
+        limit:
+          type: integer
+          example: 1000
+        offset:
+          type: integer
+          example: -1
+        count:
+          type: integer
+          example: 1
+    dimensions:
+      type: object
+      properties:
+        dimension_namespace: 
+          type: string
+        dimension_local_name: 
+          type: string
+        member_namespace: 
+          type: string
+        member_local_name: 
+          type: string
+    facts_oim_json:
+      type: object
+      additionalProperties:
+        type: object
+        properties:
+          value:
+            type: string
+          accuracy:
+            type: integer
+      example:
+        xfd233befbacbc83e43d510ae01866384c65f23a60482caaa20331642: {"value": "151000",
+      "accuracy": -3,
+      "aspects": {
+        "concept": "p2:AdjustmentsToAdditionalPaidInCapitalStockIssuedIssuanceCosts",
+        "entity": "p3:0001512228",
+        "period": "2015-07-01T00:00:00/2016-07-01T00:00:00",
+        "unit": "p1:USD",
+        "p2:StatementEquityComponentsAxis": "p2:CommonStockMember"}
+        }
+    documentInfo_oim_json:
+      type: object
+      properties:
+        documentType:
+          type: string
+          example: http://www.xbrl.org/WGWD/YYYY-MM-DD/xbrl-json
+        features:
+          type: object
+          properties:
+            xbrl:canonicalValues: 
+              type: boolean
+        prefixes:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            xbrl: "http://www.xbrl.org/WGWD/YYYY-MM-DD/oim"
+            p1: "http://www.xbrl.org/2003/iso4217"
+            p2: "http://fasb.org/us-gaap/2016-01-31"
+            p3: "http://www.sec.gov/CID"
+            p4: "http://www.xbrl.org/2003/instance"
+            p5: "http://niocorp.com/20161231"
+            p6: "http://xbrl.sec.gov/currency/2016-01-31"
+            p7: "http://xbrl.sec.gov/dei/2014-01-31"
+        taxonomy:
+          type: array
+          items:
+            type: string
+            example: 
+              "http://www.sec.gov/Archives/edgar/data/1512228/000161577417000360/niobf-20161231.xsd"
+
+  
+    concept_fields:
+      type: array
+      items:
+        type: string
+        enum: [
+              concept.balance-type
+              ,concept.datatype
+              ,concept.id
+              ,concept.is-abstract
+              ,concept.is-monetary
+              ,concept.is-nillable
+              ,concept.is-numeric
+              ,concept.local-name
+              ,concept.namespace
+              ,concept.period-type
+              ,concept.substitution
+              ,dts.id
+              ,dts.entry-point
+              ,dts.hash
+              ,dts.target-namespace
+              ,concept.*
+              ,label.id
+              ,label.text
+              ,label.lang
+              ,label.role
+              ,label.role-short
+              ,label.*
+              ,reference.role
+              ,reference.role-definition
+              ,reference.role-short
+              ,reference.*
+              ,parts.local-name
+              ,parts.namespace
+              ,parts.order
+              ,parts.part-value
+              ,reference.id
+              ,parts.*] 
+              
+    document_fields:
+      type: array
+      items:
+        type: string
+        enum: [
+              document.top-level
+              ,document.tree-level
+              ,document.tree-order
+              ,document.type
+              ,document.uri
+              ,dts.id
+              ,document.*
+              ]
+       
+    dts_fields:
+      type: array
+      items:
+        type: string
+        enum: [
+              dts.entity-name
+              ,dts.hash
+              ,dts.id
+              ,dts.entry-point
+              ,dts.taxonomy
+              ,dts.taxonomy-name
+              ,dts.version
+              ,report.filing-id
+              ,report.id
+              ,dts.*
+              ]
+    entity_only_fields:
+      type: array
+      items:
+        type: string
+        enum: [entity.cid
+              ,entity.id
+              ,entity.name
+              ,entity.scheme
+              ,entity.*
+              ]
+    entity_fields:
+      type: array
+      items:
+        type: string
+        enum: [entity.cid
+              ,entity.id
+              ,entity.name
+              ,entity.scheme
+              ,dts.id
+              ,report.accepted-timestamp
+              ,report.filing-id
+              ,report.address
+              ,report.base-taxonomy
+              ,report.creation-software
+              ,report.form-type
+              ,report.entity-name
+              ,report.entry-type
+              ,report.entry-url
+              ,report.filer-category
+              ,report.filing-date
+              ,report.id
+              ,report.is-most-current
+              ,report.period
+              ,report.period-end
+              ,report.period-index
+              ,report.phone
+              ,report.properties
+              ,report.restated
+              ,report.restated-index
+              ,report.cid
+              ,report.year
+              ,report.source-id
+              ,report.source-name
+              ,report.submission-type
+              ,entity.*
+              ,report.*
+              ]
+              
+    fact_fields:
+      type: array
+      items:
+        type: string
+        default: fact.*
+        enum: [
+              concept.balance-type
+              ,concept.datatype
+              ,concept.id
+              ,concept.is-monetary
+              ,concept.local-name
+              ,concept.namespace
+              ,concept.period-type
+              ,dimension.is-base
+              ,dimension.local-name
+              ,dimension.namespace
+              ,dimensions
+              ,dimensions.count
+              ,dimensions.id
+              ,dts.entry-point
+              ,dts.id
+              ,dts.target-namespace
+              ,entity.cid
+              ,entity.id
+              ,entity.name
+              ,entity.scheme
+              ,fact.access-level
+              ,fact.decimals
+              ,fact.has-dimensions
+              ,fact.hash
+              ,fact.id
+              ,fact.inline-display-value
+              ,fact.inline-is-hidden
+              ,fact.inline-negated
+              ,fact.inline-scale
+              ,fact.is-extended
+              ,fact.numerical-value
+              ,fact.ultimus
+              ,fact.ultimus-index
+              ,fact.value
+              ,fact.xml-id
+              ,member.is-base
+              ,member.local-name
+              ,member.namespace
+              ,period.calendar-period
+              ,period.end
+              ,period.fiscal-id
+              ,period.fiscal-period
+              ,period.fiscal-year
+              ,period.id
+              ,period.instant
+              ,period.start
+              ,period.year
+              ,report.filing-id
+              ,report.creation-software
+              ,report.entry-url
+              ,report.filing-date
+              ,report.id
+              ,report.period-end
+              ,report.restated
+              ,report.restated-index
+              ,report.submission-type
+              ,report.cid
+              ,report.year
+              ,report.source-id
+              ,report.source-name
+              ,unit
+              ,unit.denominator
+              ,unit.numerator
+              ,unit.qname
+              ,fact.*]
+
+    label_fields:
+      type: array
+      items:
+        type: string
+        enum: [
+              concept.id
+              ,concept.local-name
+              ,concept.namespace
+              ,dts.id
+              ,dts.entry-point
+              ,label.id
+              ,label.text
+              ,label.lang
+              ,label.role
+              ,label.role-short
+              ,label.*
+              ]
+    network_fields:
+      type: array
+      items:
+        type: string
+        default: fact.*
+        enum: [
+              dts.entry-point
+              ,dts.id
+              ,network.arcrole-uri
+              ,network.id
+              ,network.link-name
+              ,network.role-description
+              ,network.role-uri
+              ]
+              
+    network_con_relationship_fields:
+      type: array
+      items:
+        type: string
+        default: fact.*
+        enum: [
+              dts.entry-point
+              ,dts.id
+              ,network.arcrole-uri
+              ,network.id
+              ,network.link-name
+              ,network.role-description
+              ,network.role-uri
+              ,relationship.id
+              ,relationship.order
+              ,relationship.preferred-label
+              ,relationship.source-concept-id
+              ,relationship.source-is-abstract
+              ,relationship.source-name
+              ,relationship.source-namespace
+              ,relationship.target-concept-id
+              ,relationship.target-datatype
+              ,relationship.target-is-abstract
+              ,relationship.target-name
+              ,relationship.target-namespace
+              ,relationship.tree-depth
+              ,relationship.tree-sequence
+              ,relationship.weight
+              ]
+              
+    reference_fields:
+      type: array
+      items:
+        type: string
+        enum: [
+              concept.id
+              ,concept.local-name
+              ,concept.namespace
+              ,dts.id
+              ,dts.entry-point
+              ,reference.id
+              ,reference.role
+              ,reference.role-definition
+              ,reference.role-short
+              ,reference.*
+              ,parts.local-name
+              ,parts.namespace
+              ,parts.order
+              ,parts.part-value
+              ,parts.*
+              ] 
+              
+    relationship_fields:
+      type: array
+      items:
+        type: string
+        default: fact.*
+        enum: [
+              dts.id
+              ,network.arcrole-uri
+              ,network.id
+              ,network.link-name
+              ,network.role-description
+              ,network.role-uri
+              ,relationship.id
+              ,relationship.order
+              ,relationship.preferred-label
+              ,relationship.source-concept-id
+              ,relationship.source-is-abstract
+              ,relationship.source-name
+              ,relationship.source-namespace
+              ,relationship.target-concept-id
+              ,relationship.target-datatype
+              ,relationship.target-is-abstract
+              ,relationship.target-name
+              ,relationship.target-namespace
+              ,relationship.tree-depth
+              ,relationship.tree-sequence
+              ,relationship.weight
+              ]
+              
+    report_fields:
+      type: array
+      items:
+        type: string
+        default: report.*
+        enum: [
+              entity.cid
+              ,entity.id
+              ,dts.id
+              ,report.accepted-timestamp
+              ,report.filing-id
+              ,report.address
+              ,report.base-taxonomy
+              ,report.creation-software
+              ,report.form-type
+              ,report.entity-name
+              ,report.entry-type
+              ,report.entry-url
+              ,report.filer-category
+              ,report.filing-date
+              ,report.id
+              ,report.is-most-current
+              ,report.period
+              ,report.period-end
+              ,report.period-index
+              ,report.phone
+              ,report.properties
+              ,report.restated
+              ,report.restated-index
+              ,report.submission-type
+              ,report.cid
+              ,report.year
+              ,report.source-id
+              ,report.source-name
+              ,report.*
+              ]
+              
+    report_and_fact_fields:
+      type: array
+      items:
+        type: string
+        default: fact.*
+        enum: [
+              concept.balance-type
+              ,concept.datatype
+              ,concept.id
+              ,concept.is-monetary
+              ,concept.local-name
+              ,concept.namespace
+              ,concept.period-type
+              ,dimension.is-base
+              ,dimension.local-name
+              ,dimension.namespace
+              ,dimensions
+              ,dimensions.count
+              ,dimensions.id
+              ,dts.entry-point
+              ,dts.id
+              ,dts.target-namespace
+              ,entity.cid
+              ,entity.id
+              ,entity.name
+              ,entity.scheme
+              ,fact.access-level
+              ,fact.decimals
+              ,fact.has-dimensions
+              ,fact.hash
+              ,fact.id
+              ,fact.inline-display-value
+              ,fact.inline-is-hidden
+              ,fact.inline-negated
+              ,fact.inline-scale
+              ,fact.is-extended
+              ,fact.numerical-value
+              ,fact.ultimus
+              ,fact.ultimus-index
+              ,fact.value
+              ,fact.xml-id
+              ,member.is-base
+              ,member.local-name
+              ,member.namespace
+              ,period.calendar-period
+              ,period.end
+              ,period.fiscal-id
+              ,period.fiscal-period
+              ,period.fiscal-year
+              ,period.id
+              ,period.instant
+              ,period.start
+              ,period.year
+              ,report.accepted-timestamp
+              ,report.filing-id
+              ,report.address
+              ,report.base-taxonomy
+              ,report.creation-software
+              ,report.form-type
+              ,report.entity-name
+              ,report.entry-type
+              ,report.entry-url
+              ,report.filer-category
+              ,report.filing-date
+              ,report.id
+              ,report.is-most-current
+              ,report.period
+              ,report.period-end
+              ,report.period-index
+              ,report.phone
+              ,report.properties
+              ,report.restated
+              ,report.restated-index
+              ,report.cid
+              ,report.year
+              ,report.source-id
+              ,report.source-name
+              ,report.submission-type
+              ,report.*
+              ,unit
+              ,unit.denominator
+              ,unit.numerator
+              ,unit.qname
+              ,fact.*]
+
+
+        
+    document_details: 
+      type: object
+      properties:
+        document.top-level:
+          $ref: '#/components/schemas/document_top-level'
+        document.tree-level:
+          $ref: '#/components/schemas/document_tree-level'
+        document.tree-order:
+          $ref: '#/components/schemas/document_tree-order'
+        document.type:
+          $ref: '#/components/schemas/document_type'
+        document.uri:
+          $ref: '#/components/schemas/document_uri'
+        dts.content:
+          $ref: '#/components/schemas/dts_content'
+        dts.id:
+          $ref: '#/components/schemas/dts_id'
+ 
+    entity_details: 
+      type: object
+      properties:
+        entity.cid:
+          $ref: '#/components/schemas/entity_cid'
+        entity.id:
+          $ref: '#/components/schemas/entity_id'
+        entity.name:
+          $ref: '#/components/schemas/entity_name'
+        entity.scheme:
+          $ref: '#/components/schemas/entity_scheme'
+        report:
+          $ref: '#/components/schemas/report_sans_entity_details'
+                
+          
+    fact_details: 
+      type: object
+      properties:
+        concept.balance-type:
+          $ref: '#/components/schemas/concept_balance-type'
+        concept.datatype:
+          $ref: '#/components/schemas/concept_datatype'
+        concept.id:
+          $ref: '#/components/schemas/concept_id'
+        concept.is-monetary:
+          $ref: '#/components/schemas/concept_is-monetary'
+        concept.local-name:
+          $ref: '#/components/schemas/concept_local-name'
+        concept.namespace:
+          $ref: '#/components/schemas/concept_namespace'
+        concept.period-type:
+          $ref: '#/components/schemas/concept_period-type'
+        dimension.is-base:
+          $ref: '#/components/schemas/concept_is-base'
+        dimension.local-name:
+          $ref: '#/components/schemas/dimension_local-name'
+        dimension.namespace:
+          $ref: '#/components/schemas/dimension_namespace'
+        dimensions:
+          $ref: '#/components/schemas/dimensions_object'
+        dimensions.count:
+          $ref: '#/components/schemas/dimensions_count'
+        dimensions.id:
+          $ref: '#/components/schemas/dimensions_id'
+        dts.entry-point:
+          $ref: '#/components/schemas/dts_entry-point'
+        dts.id:
+          $ref: '#/components/schemas/dts_id'
+        dts.target-namespace:
+          $ref: '#/components/schemas/dts_target-namespace'
+        entity.cid:
+          $ref: '#/components/schemas/entity_cid'
+        entity.id:
+          $ref: '#/components/schemas/entity_id'
+        entity.name:
+          $ref: '#/components/schemas/entity_name'
+        entity.scheme:
+          $ref: '#/components/schemas/entity_scheme'
+        fact.access-level:
+          $ref: '#/components/schemas/fact_access-level'
+        fact.decimals:
+          $ref: '#/components/schemas/fact_decimals'
+        fact.has-dimensions:
+          $ref: '#/components/schemas/fact_has-dimensions'
+        fact.hash:
+          $ref: '#/components/schemas/fact_hash'
+        fact.id:
+          $ref: '#/components/schemas/fact_id'
+        fact.inline-display-value:
+          $ref: '#/components/schemas/fact_inline-display-value'
+        fact.inline-is-hidden:
+          $ref: '#/components/schemas/fact_inline-is-hidden'
+        fact.inline-negated:
+          $ref: '#/components/schemas/fact_inline-negated'
+        fact.inline-scale:
+          $ref: '#/components/schemas/fact_inline-scale'
+        fact.is-extended:
+          $ref: '#/components/schemas/fact_is-extended'
+        fact.numerical-value:
+          $ref: '#/components/schemas/fact_numerical-value'
+        fact.ultimus:
+          $ref: '#/components/schemas/fact_ultimus'
+        fact.ultimus-index:
+          $ref: '#/components/schemas/fact_ultimus-index'
+        fact.value:
+          $ref: '#/components/schemas/fact_value'
+        fact.xml-id:
+          $ref: '#/components/schemas/fact_xml-id'
+        member.is-base:
+          $ref: '#/components/schemas/member_is-base'
+        member.local-name:
+          $ref: '#/components/schemas/member_local-name'
+        member.namespace:
+          $ref: '#/components/schemas/member_namespace'
+        period.calendar-period:
+          $ref: '#/components/schemas/period_calendar-period'
+        period.end:
+          $ref: '#/components/schemas/period_end'
+        period.fiscal-id:
+          $ref: '#/components/schemas/period_fiscal-id'
+        period.fiscal-period:
+          $ref: '#/components/schemas/period_fiscal-period'
+        period.fiscal-year:
+          $ref: '#/components/schemas/period_fiscal-year'
+        period.id:
+          $ref: '#/components/schemas/period_id'
+        period.instant:
+          $ref: '#/components/schemas/period_instant'
+        period.start:
+          $ref: '#/components/schemas/period_start'
+        period.year:
+          $ref: '#/components/schemas/period_year'
+        report.filing-id:
+          $ref: '#/components/schemas/report_accession'
+        report.creation-software:
+          $ref: '#/components/schemas/report_creation-software'
+        report.entry-url:
+          $ref: '#/components/schemas/report_entry-url'
+        report.filing-date:
+          $ref: '#/components/schemas/report_filing-date'
+        report.id:
+          $ref: '#/components/schemas/report_id'
+        report.period-end:
+          $ref: '#/components/schemas/report_period-end'
+        report.restated:
+          $ref: '#/components/schemas/report_restated'
+        report.restated-index:
+          $ref: '#/components/schemas/report_restated-index'
+        report.cid:
+          $ref: '#/components/schemas/report_cid'
+        report.year:
+          $ref: '#/components/schemas/report_year'
+        report.source-id:
+          $ref: '#/components/schemas/report_source-id'
+        report.source-name:
+          $ref: '#/components/schemas/report_source-name'
+        report.submission-type:
+          $ref: '#/components/schemas/report_source-name'
+        unit:
+          $ref: '#/components/schemas/unit'
+        unit.denominator:
+          $ref: '#/components/schemas/unit_denominator'
+        unit.numerator:
+          $ref: '#/components/schemas/unit_numerator'
+        unit.qname:
+          $ref: '#/components/schemas/unit_qname'
+    
+    network_only_details:
+      type: object
+      properties: 
+        dts.entry-point:
+          $ref: '#/components/schemas/dts_entry-point'
+        dts.id:
+          $ref: '#/components/schemas/dts_id'
+        network.arcrole-uri:
+          $ref: '#/components/schemas/network_arcrole-uri'
+        network.id:
+           $ref: '#/components/schemas/network_id'
+        network.link-name:
+          $ref: '#/components/schemas/network_link-name'
+        network.role-description:
+          $ref: '#/components/schemas/network_role-description'
+        network.role-uri:
+          $ref: '#/components/schemas/network_role-uri'
+          
+    network_details:
+      type: object
+      properties:
+        dts.entry-point:
+          $ref: '#/components/schemas/dts_entry-point'
+        dts.id:
+          $ref: '#/components/schemas/dts_id'
+        network.arcrole-uri:
+          $ref: '#/components/schemas/network_arcrole-uri'
+        network.id:
+           $ref: '#/components/schemas/network_id'
+        network.link-name:
+          $ref: '#/components/schemas/network_link-name'
+        network.role-description:
+          $ref: '#/components/schemas/network_role-description'
+        network.role-uri:
+          $ref: '#/components/schemas/network_role-uri'
+        relationship:
+          type: object
+          properties:
+            paging:
+              $ref: '#/components/schemas/paging'
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/relationship_details'
+          
+          
+    report_details:
+      type: object
+      properties:
+        dts.id:
+          $ref: '#/components/schemas/dts_id'
+        entity.cid:
+          $ref: '#/components/schemas/entity_cid'
+        entity.id:
+          $ref: '#/components/schemas/entity_id'
+        report.filing-id:
+          $ref: '#/components/schemas/report_accession'
+        report.address:
+          $ref: '#/components/schemas/report_address'
+        report.base-taxonomy:
+          $ref: '#/components/schemas/report_base-taxonomy'
+        report.checks-run:
+          $ref: '#/components/schemas/report_checks-run'
+        report.creation-software:
+           $ref: '#/components/schemas/report_creation-software'
+        report.form-type:
+           $ref: '#/components/schemas/report_form-type'
+        report.entity-name:
+           $ref: '#/components/schemas/report_entity-name'
+        report.entry-type:
+           $ref: '#/components/schemas/report_entry-type'
+        report.entry-url:
+           $ref: '#/components/schemas/report_entry-url'
+        report.filer-category:
+           $ref: '#/components/schemas/report_filer-category'
+        report.filing-date:
+           $ref: '#/components/schemas/report_filing-date'
+        report.id:
+           $ref: '#/components/schemas/report_id'
+        report.is-most-current:
+           $ref: '#/components/schemas/report_is-most-current'
+        report.period:
+           $ref: '#/components/schemas/report_period'
+        report.period-end:
+           $ref: '#/components/schemas/report_period-end'
+        report.period-index:
+           $ref: '#/components/schemas/report_period-index'
+        report.phone:
+           $ref: '#/components/schemas/report_phone'
+        report.restated:
+           $ref: '#/components/schemas/report_restated'
+        report.restated-index:
+           $ref: '#/components/schemas/report_restated-index'
+        report.cid:
+           $ref: '#/components/schemas/report_cid'
+        report.year:
+           $ref: '#/components/schemas/report_year'
+        report.source-id:
+           $ref: '#/components/schemas/report_source-id'
+        report.source-name:
+           $ref: '#/components/schemas/report_source-name'
+        report.submission-type:
+          $ref: '#/components/schemas/report_source-name'
+
+           
+    report_sans_entity_details:
+      type: object
+      properties:
+        dts.id:
+          $ref: '#/components/schemas/dts_id'
+        report.filing-id:
+          $ref: '#/components/schemas/report_accession'
+        report.address:
+          $ref: '#/components/schemas/report_address'
+        report.base-taxonomy:
+          $ref: '#/components/schemas/report_base-taxonomy'
+        report.checks-run:
+          $ref: '#/components/schemas/report_checks-run'
+        report.creation-software:
+           $ref: '#/components/schemas/report_creation-software'
+        report.form-type:
+           $ref: '#/components/schemas/report_form-type'
+        report.entity-name:
+           $ref: '#/components/schemas/report_entity-name'
+        report.entry-type:
+           $ref: '#/components/schemas/report_entry-type'
+        report.entry-url:
+           $ref: '#/components/schemas/report_entry-url'
+        report.filer-category:
+           $ref: '#/components/schemas/report_filer-category'
+        report.filing-date:
+           $ref: '#/components/schemas/report_filing-date'
+        report.id:
+           $ref: '#/components/schemas/report_id'
+        report.is-most-current:
+           $ref: '#/components/schemas/report_is-most-current'
+        report.period:
+           $ref: '#/components/schemas/report_period'
+        report.period-end:
+           $ref: '#/components/schemas/report_period-end'
+        report.period-index:
+           $ref: '#/components/schemas/report_period-index'
+        report.phone:
+           $ref: '#/components/schemas/report_phone'
+        report.restated:
+           $ref: '#/components/schemas/report_restated'
+        report.restated-index:
+           $ref: '#/components/schemas/report_restated-index'
+        report.cid:
+           $ref: '#/components/schemas/report_cid'
+        report.year:
+           $ref: '#/components/schemas/report_year'
+        report.source-id:
+           $ref: '#/components/schemas/report_source-id'
+        report.source-name:
+           $ref: '#/components/schemas/report_source-name'
+        report.submission-type:
+          $ref: '#/components/schemas/report_source-name'
+  
+        
+    fact_details_sans_report:
+      type: object
+      properties:
+        concept.balance-type:
+          $ref: '#/components/schemas/concept_balance-type'
+        concept.datatype:
+           $ref: '#/components/schemas/concept_datatype'
+        concept.id:
+          $ref: '#/components/schemas/concept_id'
+        concept.is-monetary:
+           $ref: '#/components/schemas/concept_is-monetary'
+        concept.local-name:
+          $ref: '#/components/schemas/concept_local-name'
+        concept.namespace:
+          $ref: '#/components/schemas/concept_namespace'
+        concept.period-type:
+          $ref: '#/components/schemas/concept_period-type'
+        dimension.is-base:
+          $ref: '#/components/schemas/dimension_is-base'
+        dimensions:
+          $ref: '#/components/schemas/dimensions_object'
+        dimensions.count:
+          $ref: '#/components/schemas/dimensions_count'
+        dimensions.id:
+          $ref: '#/components/schemas/dimensions_id'
+        dts.entry-point:
+          $ref: '#/components/schemas/dts_entry-point'
+        dts.target-namespace:
+          $ref: '#/components/schemas/dts_target-namespace'
+        entity.name:
+          $ref: '#/components/schemas/entity_name'
+        entity.scheme:
+          $ref: '#/components/schemas/entity_scheme'
+        fact.access-level:
+          $ref: '#/components/schemas/fact_access-level'
+        fact.decimals:
+          $ref: '#/components/schemas/fact_decimals'
+        fact.has-dimensions:
+          $ref: '#/components/schemas/fact_has-dimensions'
+        fact.hash:
+          $ref: '#/components/schemas/fact_hash'
+        fact.id:
+          $ref: '#/components/schemas/fact_id'
+        fact.inline-display-value:
+          $ref: '#/components/schemas/fact_inline-display-value'
+        fact.inline-is-hidden:
+          $ref: '#/components/schemas/fact_inline-is-hidden'
+        fact.inline-negated:
+          $ref: '#/components/schemas/fact_inline-negated'
+        fact.inline-scale:
+          $ref: '#/components/schemas/fact_inline-scale'
+        fact.is-extended:
+          $ref: '#/components/schemas/fact_is-extended'
+        fact.numerical-value:
+          $ref: '#/components/schemas/fact_numerical-value'
+        fact.ultimus:
+          $ref: '#/components/schemas/fact_ultimus'
+        fact.ultimus-index:
+          $ref: '#/components/schemas/fact_ultimus-index'
+        fact.value:
+          $ref: '#/components/schemas/fact_value'
+        fact.xml-id:
+          $ref: '#/components/schemas/fact_xml-id'
+        member.is-base:
+          $ref: '#/components/schemas/member_is-base'
+        period.calendar-period:
+          $ref: '#/components/schemas/period_calendar-period'
+        period.end:
+          $ref: '#/components/schemas/period_end'
+        period.fiscal-id:
+          $ref: '#/components/schemas/period_fiscal-id'
+        period.fiscal-period:
+          $ref: '#/components/schemas/period_fiscal-period'
+        period.fiscal-year:
+          $ref: '#/components/schemas/period_fiscal-year'
+        period.id:
+          $ref: '#/components/schemas/period_id'
+        period.instant:
+          $ref: '#/components/schemas/period_instant'
+        period.start:
+          $ref: '#/components/schemas/period_start'
+        period.year:
+          $ref: '#/components/schemas/period_year'
+        unit:
+          $ref: '#/components/schemas/unit'
+        unit.denominator:
+          $ref: '#/components/schemas/unit_denominator'
+        unit.numerator:
+          $ref: '#/components/schemas/unit_numerator'
+        unit.qname:
+          $ref: '#/components/schemas/unit_qname'
+      
+    report_details_with_facts:
+      type: object
+      properties:
+        dts.id:
+          $ref: '#/components/schemas/dts_id'
+        entity.cid:
+          $ref: '#/components/schemas/entity_cid'
+        entity.id:
+          $ref: '#/components/schemas/entity_id'
+        report.filing-id:
+          $ref: '#/components/schemas/report_accession'
+        report.address:
+          $ref: '#/components/schemas/report_address'
+        report.base-taxonomy:
+          $ref: '#/components/schemas/report_base-taxonomy'
+        report.checks-run:
+           $ref: '#/components/schemas/report_checks-run'
+        report.creation-software:
+           $ref: '#/components/schemas/report_creation-software'
+        report.form-type:
+           $ref: '#/components/schemas/report_form-type'
+        report.entity-name:
+           $ref: '#/components/schemas/report_entity-name'
+        report.entry-type:
+           $ref: '#/components/schemas/report_entry-type'
+        report.entry-url:
+           $ref: '#/components/schemas/report_entry-url'
+        report.filer-category:
+           $ref: '#/components/schemas/report_filer-category'
+        report.filing-date:
+           $ref: '#/components/schemas/report_filing-date'
+        report.id:
+           $ref: '#/components/schemas/report_id'
+        report.is-most-current:
+           $ref: '#/components/schemas/report_is-most-current'
+        report.period:
+           $ref: '#/components/schemas/report_period'
+        report.period-end:
+           $ref: '#/components/schemas/report_period-end'
+        report.period-index:
+           $ref: '#/components/schemas/report_period-index'
+        report.phone:
+           $ref: '#/components/schemas/report_phone'
+        report.restated:
+           $ref: '#/components/schemas/report_restated'
+        report.restated-index:
+           $ref: '#/components/schemas/report_restated-index'
+        report.cid:
+           $ref: '#/components/schemas/report_cid'
+        report.year:
+           $ref: '#/components/schemas/report_year'
+        report.source-id:
+           $ref: '#/components/schemas/report_source-id'
+        report.source-name:
+           $ref: '#/components/schemas/report_source-name'
+
+        fact:
+          type: object
+          properties:
+            paging:
+              $ref: '#/components/schemas/paging'
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/fact_details_sans_report'
+    concept_details: 
+      type: object
+      properties:
+        concept.balance-type:
+          $ref: '#/components/schemas/concept_balance-type'
+        concept.datatype:
+          $ref: '#/components/schemas/concept_datatype'
+        concept.id:
+          $ref: '#/components/schemas/concept_id'
+        concept.is-abstract:
+          $ref: '#/components/schemas/concept_is-abstract'
+        concept.is-monetary:
+           $ref: '#/components/schemas/concept_is-monetary'
+        concept.is-nillable:
+           $ref: '#/components/schemas/concept_is-nillable'
+        concept.is-numeric:
+           $ref: '#/components/schemas/concept_is-numeric'
+        concept.local-name:
+          $ref: '#/components/schemas/concept_local-name'
+        concept.namespace:
+          $ref: '#/components/schemas/concept_namespace'
+        concept.period-type:
+          $ref: '#/components/schemas/concept_period-type'
+        concept.substitution:
+          $ref: '#/components/schemas/concept_substitution'
+        dts.entry-point:
+          $ref: '#/components/schemas/dts_entry-point'
+        dts.hash:
+          $ref: '#/components/schemas/dts_hash'
+        dts.id:
+          $ref: '#/components/schemas/dts_id'
+        dts.target-namespace:
+          $ref: '#/components/schemas/dts_target-namespace'
+        label:
+          $ref: '#/components/schemas/label_object'
+        reference:
+          $ref: '#/components/schemas/reference_object'
+    dts_details: 
+      type: object
+      properties:
+        dts.entity-name:
+          $ref: '#/components/schemas/dts_entity-name'
+        dts.entry-point:
+          $ref: '#/components/schemas/dts_entry-point'
+        dts.hash:
+          $ref: '#/components/schemas/dts_hash'
+        dts.id:
+          $ref: '#/components/schemas/dts_id'
+        dts.taxonomy:
+          $ref: '#/components/schemas/dts_taxonomy'
+        dts.taxonomy-name:
+          $ref: '#/components/schemas/dts_taxonomy-name'
+        dts.version:
+          $ref: '#/components/schemas/dts_version'
+        report.filing-id:
+          $ref: '#/components/schemas/report_accession'
+        report.id:
+          $ref: '#/components/schemas/report_id'
+        
+  # This is where all the field properties are defined
+
+    
+    concept_balance-type:
+        type: integer
+        description: The balance type of a concept. This can be either debit, credit or not defined.
+    concept_datatype:
+      type: string
+      description: The datatype of the concept such as monetary or string.
+      example: monetaryItemType
+    concept_id:
+      type: integer
+      description: A unique integer for a concept that can be searched. This is a faster way to retrieve the details of a fact, however it is namespace specific and will only search for the use of a concept for a specific schema.
+      example: 16261
+    concept_is-abstract:
+      type: boolean
+      description: Identifies if the concept is an abstract concept. If a primary concept is an abstract (not an axis or dimension) it cannot have a value associated with it.
+      example: true
+    concept_is-base:
+      type: boolean
+      description: Identifies if the concept is from a base published taxonomy (ie. US GAAP, IFRS) or from a company extension. A value of true indicates that it is a base taxonomy element. This attribute can be used to find extension elements in a filing.
+      example: true
+    concept_is-monetary:
+      type: boolean
+      description: Identifies if the concept is a monetary value when the attribute is true. A monetary value is differs from a numeric concept because it has a currency associated with it.
+      example: true
+    concept_is-nillable:
+      type: boolean
+      description: Identifies whether the concept can have a nill value.
+      example: true
+    concept_is-numeric:
+      type: boolean
+      description: Identifies whether the concept is a numeric value when the attribute is true.
+      example: true
+    concept_local-name:
+      type: string
+      description: The concept name in the base schema of a taxonomy exluding the namespace, such as Assets or Liabilities. Use this to search across multiple taxonomies where the local name is known to be consistent over time.
+      example: Assets
+    concept_namespace:
+      type: string
+      description: The namespace of the concept used to identify a fact.
+    concept_period-type:
+      type: integer
+      description: The period type of the concept. This can be either duration or instant.
+      example: duration
+    concept_substitution:
+      type: string
+      description: The substitution group of the concept.
+      example: xbrl:item
+    
+    dimension_is-base:
+      type: boolean
+      description: A boolean value that indicates if the dimension (aspect) is a base element in the reporting taxonomy or a company extension.
+    dimension_local-name:
+      type: string
+      description: Local name of the dimension used with the fact.
+    dimension_namespace:
+      type: string
+      description: Namespace of the dimension used with the fact.
+    dimensions_object:
+      type: array
+      description: Returns an array of dimensions associated with the given fact.
+      items:
+        $ref: '#/components/schemas/dimensions'
+    dimensions_count:
+      type: integer
+      description: The number of dimensional qualifiers associated with a given fact. A comma-delimited list will return facts with 0, 1, 2 etc. dimensions.
+    dimensions_id:
+      type: string
+      description: ID of the dimension.
+    
+    document_top-level:
+      type: boolean
+      description: Boolean that indicates if the file in a DTS is the entry point.
+      example: true
+    document_tree-level:
+      type: integer
+      description: Level of the files in terms of which files import or reference child files.
+      example: 2
+    document_tree-order:
+      type: integer
+      description: Order of the files in terms of how the DTS is compiled from the underlying documents.
+      example: 2      
+    document_type:
+      type: string
+      description: Indicates if the document is a schema, linkbase or instance.
+      example: 'inline'
+    document_uri:
+      type: string
+      format: uri
+      description: The URL at which the document comprising the DTS is located.
+      example: 'http://www.sec.gov/Archives/edgar/data/46619/000004661918000117/hei1031201810k.htm'
+    
+    dts_content:
+      type: string
+      description: Contents of the document
+      example: 'Contents of the file contains .....'
+    dts_entity-name:
+      type: string
+      description: The name of the entity that the DTS is applicable to. If the DTS is non company specific this value is null.
+      example: Apple Inc.
+    dts_entry-point:
+      type: string
+      description: The URL entry point of a discoverable taxonomy set. This is also referred to as the entry point for a taxonomy. A taxonomy can have multiple entry points and the resulting set of taxonomies of using an entry point is called a DTS.
+      example: http://xbrl.fasb.org/us-gaap/2017/entire/us-gaap-entryPoint-all-2017-01-31.xsd
+    dts_hash:
+      type: string
+      description: The DTS identifier for a given group of taxonomies as a hex hash. XBRL facts and linkbases are typically associated with a given report that is asscociated with a DTS.
+      example: \\xb46b615601cd46644a3de5f91adeca28462bcde252b1d7d1d970b011
+    dts_id:
+      type: integer
+      description:  A unique integer as a DTS identifier for a given group of taxonomies. XBRL facts and linkbases are typically associated with a given report that is asscociated with a DTS.
+      example: 1
+    dts_taxonomy:
+      type: string
+      description: The taxonomy group that the taxonomy belongs to, such as Form 1 or Form 2.
+      example: Form 2
+    dts_taxonomy-name:
+      type: string
+      description: The specific taxonomy name such as `Form 1 2022` or `Form 2 2021`.
+      example: Form 2 2021
+    dts_target-namespace:
+      type: string
+      description: The target namespace of a discoverable taxonomy set (DTS).
+    dts_version:
+      type: string
+      description: The specific taxonomy version name such as `2022` for Form 1.
+      example: 2022.
+      
+    entity_cid:
+      type: string
+      description: The CID is the FERC identifier used to identify a reporting entity. This is the CID associated with a given fact, DTS or report.
+      example: "0001000045"
+    entity_id:
+      type: integer
+      description: The internal identifier used to identify an entity. This will be replaced with the LEI when the FERC supports the LEI standard.
+      example: 1
+    entity_name:
+      type: string
+      description: The name of the entity reporting.
+    entity_scheme:
+      type: string
+      description: The scheme of the identifier associated with a fact, report or DTS. A fact could have multiple entity identifiers and this indicates the identifier that was used.
+    fact_access-level:
+      type: string
+      description: Boolean indicator that indicates if the fact requires user access.
+    
+    fact_decimals:
+      type: string
+      description: The decimal value associated with a fact. This can be either a number representing decimal places or be infinite. There are two values returned for this field the first is a decimal and the second is a boolean. The first indicates the decimal places if applicable and the second identifies if the value is infinite(T) or not (F).
+    fact_has-dimensions:
+      type: boolean
+      description: This boolean field indicates if the fact has any dimensions associated with it.
+    fact_hash:
+      type: string
+      description: The fact hash is derived from the aspect properties of the fact. Each fact will have a different hash in a given report. Over time however, different facts may have the same hash if they are identical. The hash does not take into account the value reported for the fact. The fact hash is used to determine the ultimus index. By searching on the hash you can identify all identical facts that were reported.
+    fact_id:
+      type: integer
+      description: The internal identifier used to identify a fact.
+    fact_inline-display-value:
+      type: string
+      description: Value actually displayed in the inline document.
+    fact_inline-is-hidden:
+      type: boolean
+      description: Boolean that indicates if the fact was hidden in the inline document.
+    fact_inline-negated:
+      type: boolean
+      description: Boolean that indicates if the fact was negated in the inline document.
+    fact_inline-scale:
+      type: integer
+      description: Integer that indicates the scale used on the fact in the inline document.
+      example: 3
+    fact_is-extended:
+      type: boolean
+      description: This indicates if the fact is comprised of either an extension concept, extension axis or extension member.
+    fact_numerical-value:
+      type: number
+      description: The numerical value of the reported fact.
+    fact_ultimus:
+      type: boolean
+      description: A boolean that indicates if the fact is the latest value reported.  A value of true represents the latest value reported.  A value of false represents that the value has been super-ceded with a more recent fact. If requesting values from a specific report, the ultimus should not be used as a search parameter, as all the fact values will not be returned if a subsequent report has been filed in which the fact appears.
+    fact_ultimus-index:
+      type: integer
+      description: An integer that records the incarnation of the fact. The same fact may be reported many times and the ultimus field represents the reverse order of incarnation for the fact's reporting. A value of 1 indicates that this is the latest value of the fact. A value of 6 for example would indicate that the value has been reported 6 times subsequent to the fact's most-recent reporting. If requesting values from a specific report, the ultimus index should not be used as a search parameter, as all the fact values will not be returned if a subsequent report has been filed in which the fact appears.
+    fact_value:
+      type: string
+      description: The value of the fact as a text value. This includes numerical as well as non-numerical values reported.
+    fact_xml-id:
+      type: string
+      description: The xml-id included in the filing. Not all facts will have this identifier, as it is dependent ofn the filer adding it. Where it is used (in inline filings, for example), it can be used to locate the fact value in the filing.
+    
+    label_object:
+      type: object
+      properties:
+        paging:
+          $ref: '#/components/schemas/paging'
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/label_details' 
+      description: Label object that defines the details associated with a label.
+    label_details:
+      type: object
+      properties:
+        label.id:
+          type: string
+        label.lang:
+          type: string
+          example: en-US
+        label.role:
+          type: string
+          format: uri
+          example: http://www.xbrl.org/2003/role/label
+        label.role-short:
+          type: string
+          example: label
+        label.text:
+          type: string
+          example: Assets
+    label_details_search:
+      allOf:
+        - type: object
+          properties:
+            concept.id:
+              $ref: '#/components/schemas/concept_id'
+            concept.local-name:
+              $ref: '#/components/schemas/concept_local-name'
+            concept.namespace:
+              $ref: '#/components/schemas/concept_namespace'
+            dts.id:
+              $ref: '#/components/schemas/dts_id'
+            dts.entry-point:
+              $ref: '#/components/schemas/dts_entry-point'
+        - $ref:  '#/components/schemas/label_details'
+        
+    member_is-base:
+      type: boolean
+      description: A boolean value that indicates if the member is a base element in the reporting taxonomy or a company extension.
+    member_local-name:
+      type: string
+      description: Local name of the member.
+    member_namespace:
+      type: string
+      description:  Namespace of the member.
+      
+    network_arcrole-uri:
+      type: string
+      format: uri
+      description: URI that identifies the link types, such as parent-child. However, this is the full URI of http://www.xbrl.org/2003/arcrole/parent-child.
+      example: http://www.xbrl.org/2003/arcrole/parent-child
+    network_id:
+      type: integer
+      description: Unique internal identifier used to identify a specific network. A different identifier is used for networks with the same role but different linkbase types.
+    network_link-name:
+      type: string
+      description: Name that identifies the link type. This corresponds to a linkbase i.e. presentationLink, calculationLink, definitionLink.
+      example: presentationLink
+    network_role-description:
+      type: string
+      description: Readable name or description of the header.
+      example: 40201 - Disclosure - Balance Sheet Components (Details)
+    network_role-uri:
+      type: string
+      format: uri
+      description: The URI of the network role. This would appear as a URI describing the reporting group i.e. http://www.bc.com/role/DisclosureBalanceSheetComponentsDetails.
+      example: http://www.bc.com/role/DisclosureBalanceSheetComponentsDetails
+      
+    parts_object:
+      type: object
+      properties:
+        paging:
+          $ref: '#/components/schemas/paging'
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/parts_details' 
+      description: Parts object that defines the details associated with a part.
+    parts_details:
+      type: object
+      properties:
+        parts.local-name:
+          type: string
+          example: TaxonomyVersion
+        parts.namespace:
+          type: string
+          format: uri
+          example: http://fasb.org/cn-part/2019-01-31
+        parts.order:
+          type: integer
+          description: order assigned to the part.
+        parts.part-value:
+          type: string
+          description: Value assigned to the part.
+          example: "US GAAP 2018"
+        reference.id:
+          type: string
+    
+    period_calendar-period:
+      type: string
+      description: The period identifier for the fact such as year(Y) quarters such as (Q1,Q2,Q3,Q4), cumulative quarters such as 3QCUM, and half years such as H1 and H2. The calendar period aligns the periods with a calendar year. A company with a year end of 30 September would have a fiscal 4th quarter which would be a calendar quarter of Q3.
+    period_end:
+      type: string
+      format: date
+      description: Period end date of the fact, if applicable.
+    period_fiscal-id:
+      type: string
+      description: The identifier of the fiscal period. Each period has an assigned hash which identifies the fiscal period. The hash can be used to search for periods that are identical. Periods with the same period and year in fact may be different as the fiscal periods and years are approximations. The logic applied in the API is that if a fact is more than 15 days into a year beginning January 1, the fact is in the same fiscal year as the year beginning January 1.
+    period_fiscal-period:
+      type: string
+      description: The period identifier for the fact such as year(Y) quarters such as (Q1,Q2,Q3,Q4), cumulative quarters such as 3QCUM, and half years such as H1 and H2. The fiscal period aligns the periods with a fiscal year. A company with a year end of 30 September would have a fiscal 4th quarter which would be a fiscal quarter of Q4 and a calender quarter of Q3.
+    period_fiscal-year:
+      type: integer
+      description: The fiscal year in which the fact is applicable in the format 'YYYY'.
+      maxLength: 4
+      minLength: 4
+    period_id:
+      type: string
+      description: The identifier of the calender period. Each period has an assigned hash which identifies the period. The hash can be used to search for periods that are identical. Periods with the same period and year in fact may be different as the fiscal period is an approximation.
+    period_instant:
+      type: string
+      format: date
+      description: Instant in time at which the fact was measured. This is only applicable for facts with a period type of instant.
+    period_start:
+      type: string
+      format: date
+      description: Period start date of the fact, if applicable.
+      example: "2018-01-01"
+    period_year:
+      type: integer
+      description: The calendar year in which the fact is applicable in the format 'YYYY'.
+      maxLength: 4
+      minLength: 4
+      example: 2018
+      
+    reference_object:
+      type: object
+      properties:
+        paging:
+          $ref: '#/components/schemas/paging'
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/reference_details' 
+      description: Reference object that defines the details associated with a reference.
+    reference_concept_details:
+      allOf:
+        - type: object
+          properties:
+            concept.id:
+              $ref: '#/components/schemas/concept_id'
+            concept.local-name:
+              $ref: '#/components/schemas/concept_local-name'
+            concept.namespace:
+              $ref: '#/components/schemas/concept_namespace'
+            dts.id:
+              $ref: '#/components/schemas/dts_id'
+            dts.entry-point:
+              $ref: '#/components/schemas/dts_entry-point'
+        - $ref: '#/components/schemas/reference_details'
+      description: Reference object that defines the details associated with a reference.
+    reference_details:
+      type: object
+      properties:
+        reference.id:
+          type: string
+        reference.role:
+          type: string
+          format: uri
+          example: http://fasb.org/us-gaap/role/ref/legacyRef
+        reference.role-definition:
+          type: string
+          example: Legacy reference
+        reference.role-short:
+          type: string
+          example: legacyRef
+        parts:
+          $ref: '#/components/schemas/parts_object'
+    
+    relationship_details_search:
+      allOf:
+        - type: object
+          properties:
+            dts.id:
+              $ref: '#/components/schemas/dts_id'
+            network.arcrole-uri:
+              $ref: '#/components/schemas/network_arcrole-uri'
+            network.id:
+              $ref: '#/components/schemas/network_id'
+            network.link-name:
+              $ref: '#/components/schemas/network_link-name'
+            network.role-description:
+              $ref: '#/components/schemas/network_role-description'
+            network.role-uri:
+              $ref: '#/components/schemas/network_role-uri'
+        - $ref:  '#/components/schemas/relationship_details'
+    relationship_id:
+      type: integer
+      description: An internal identifier associated with the relationship.
+    relationship_order:
+      type: integer
+      description: The order of the relationships relative to each other.
+    relationship_preferred-label:
+      type: string
+      description: The preferred label attribute value associated with a relationship.
+    relationship_source-concept-id:
+      type: integer
+      description: The unique identifier for the concept that is the basis of the relationship.
+    relationship_source-is-abstract:
+      type: boolean
+      description: The abstract indicator (boolean) of the concept that is the basis of the relationship.
+    relationship_source-name:
+      type: string
+      description: The name of the concept that is the basis of the relationship.
+    relationship_source-namespace:
+      type: string
+      format: uri
+      description: The namespace of the concept that is the basis of the relationship.
+    relationship_target-concept-id:
+      type: integer
+      description: The unique identifier for the concept under the source relationship.
+    relationship_target-datatype:
+      type: string
+      description: The datatype of the concept under the source relationship.
+      example: monetaryItemType
+    relationship_target-is-abstract:
+      type: boolean
+      description: The abstract indicator (boolean) of the concept under the source relationship.
+      example: false
+    relationship_target-name:
+      type: string
+      description: The name of the concept under the source relationship.
+      example: CommitmentsAndContingencies
+    relationship_target-namespace:
+      type: string
+      format: uri
+      description: The namespace of the concept under the source relationship.
+      example: http://fasb.org/us-gaap/2016-01-31
+    relationship_tree-depth:
+      type: integer
+      description: When viewed as a tree, the value represents the number of positions from the root node of the relationship.
+      example: 3
+    relationship_tree-sequence:
+      type: integer
+      description: The order in which the relationship appears in the entire network.
+    relationship_weight:
+      type: integer
+      description: The calculation weight attribute value associated with a relationship..
+    relationship_details:    
+      type: object 
+      properties:  
+        relationship.id:
+           $ref: '#/components/schemas/relationship_id'
+        relationship.order:
+          $ref: '#/components/schemas/relationship_order'
+        relationship.preferred-label:
+          $ref: '#/components/schemas/relationship_preferred-label'
+        relationship.source-concept-id:
+          $ref: '#/components/schemas/relationship_source-concept-id'
+        relationship.source-is-abstract:
+          $ref: '#/components/schemas/relationship_source-is-abstract'
+        relationship.source-name:
+           $ref: '#/components/schemas/relationship_source-name'
+        relationship.source-namespace:
+          $ref: '#/components/schemas/relationship_source-namespace'
+        relationship.target-concept-id:
+          $ref: '#/components/schemas/relationship_target-concept-id'
+        relationship.target-datatype:
+          $ref: '#/components/schemas/relationship_target-datatype'
+        relationship.target-is-abstract:
+          $ref: '#/components/schemas/relationship_target-is-abstract'
+        relationship.target-name:
+          $ref: '#/components/schemas/relationship_target-name'
+        relationship.target-namespace:
+          $ref: '#/components/schemas/relationship_target-namespace'
+        relationship.tree-depth:
+          $ref: '#/components/schemas/relationship_tree-depth'
+        relationship.tree-sequence:
+          $ref: '#/components/schemas/relationship_tree-sequence'
+        relationship.weight:       
+          $ref: '#/components/schemas/relationship_weight'
+    
+    report_accession:
+      type: string
+      description: The unique identifier (inclusive of the entity CID) used by the FERC for a report.
+      example: 0001193125-11-216128
+    report_accepted-timestamp:
+      type: string
+      format: date
+      description: Date that the report was accepted.
+    report_address:
+      type: string
+      description: Physical address of the reporting entity.
+      example: 2454 MCMULLEN BOOTH RD, BLDG C SUITE 501 B, CLEARWATER FL 33759
+    report_base-taxonomy:
+      type: string
+      description: Base taxonomy used for the filing. e.g. US-GAAP
+      example: US GAAP 2011
+    report_checks-run:
+       type: boolean
+       description: Indicates if the Data Quality  checks have run for this report.
+       example: true
+    report_creation-software:
+       type: string
+       description: The creation software that was used to create a report.
+       example: XBRL document created with Ez-XBRL version 3.0.1.2
+    report_form-type:
+       type: string
+       description: The form type of the report e.g. 1, 2A 1F, etc.
+       example: 2A   
+    report_entity-name:
+       type: string
+       description: The name of the entity submitting the report.
+       example: NICHOLAS FINANCIAL INC
+    report_entry-type:
+       type: string
+       description: The entry type of the report. This could be instance or inline.
+       example: instance
+    report_entry-url:
+       type: string
+       description: The URL entry point of a discoverable taxonomy set. This is also referred to as the entry point for a taxonomy. This represents the DTS entry point for a specific report.
+      
+    report_filer-category:
+       type: string
+       description: Filer category of the report.  
+       example: Accelerated Filer
+    report_filing-date:
+       type: string
+       format: date
+       description: The date that the report was filed with the regulator.
+       example: "2011-08-09" 
+    report_id:
+       type: integer
+       description: The internal identifier assigned to a report.
+       example: 1234
+    report_is-most-current:
+       type: boolean
+       description: A boolean indicator for whether the report is the most current (true).
+       example: true
+    report_period:
+       type: string
+       description: The period of the report e.g. Q1, Q2, Q3, Q4, etc.
+       example: 2A   
+    report_period-end:
+       type: string
+       description: The period end date or balance date associated with a given report.    
+    report_period-index:
+       type: string
+       description: Allows the retrieval of reports other than most current. A value of 1 gets the latest report_ A value of 2 gets the second to last report etc.
+    report_phone:
+       type: string
+       description: The phone number of the submitter of the report.
+    report_restated:
+       type: boolean
+       description: A boolean that indicates if the report has been subsequently restated.  A value of true represents that the report has been subsequently restated by another report.  A value of false means that this report has not been subsequently restated by another report.
+    report_restated-index:
+       type: integer
+       description: A numerical indicator that can be used to identify if a report has been restated. If the value is 1 it indicates that this is the latest report. If the value is 2 it means that an updated copy of the report has been filed.
+    report_cid:
+       type: string
+       description: The CID of the entity.
+    report_year:
+       type: string
+       description: Integer that the year of the report.
+    report_source-id:
+       type: integer
+       description: ID of the filing program.
+    report_source-name:
+       type: string
+       description: Name of the source of the data such as FERC.
+    report_submission-type:
+       type: string
+       description: Indicates if the report is the original or re-submitted.   
+    
+    unit:
+      type: string
+      description: The unit of measure associated with the fact, such as USD.
+      example: USD
+    unit_denominator:
+      type: string
+      description: The unit of measure used as the denominator for a fact.
+    unit_numerator:
+      type: string
+      description: The unit of measure used as the numerator for a fact.
+    unit_qname:
+      type: string
+      description: The full qname of the unit of measure, includes the namespace of the unit in clark notation.
+      example: '{http://www.xbrl.org/2003/iso4217}USD'
+
+  parameters:
+
+
+    concept.id_Param:         # Can be referenced via '#/components/parameters/concept-id_Param'
+          in: query
+          name: concept.id
+          schema:
+            type: integer
+          description: A unique integer for a concept that can be searched. This is a faster way to retrieve the details of a fact, however it is namespace specific and will only search for the use of a concept for a specific schema.
+    concept.is-monetary_Param:    
+          in: query
+          name: concept.is-monetary
+          schema:
+            type: boolean
+            description: Identifies if the concept is a monetary value when the attribute is true. A monetary value is differs from a numeric concept because it has a currency associated with it.
+    concept.local-name_Param:       
+          in: query
+          name: concept.local-name
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: The concept name in the base schema of a taxonomy exluding the namespace, such as Assets or Liabilities. Use this to search across multiple taxonomies where the local name is known to be consistent over time.
+    concept.namespace_Param:     
+          in: query
+          name: concept.namespace
+          schema:
+            type: string
+          description: The namespace of the concept used to identify a fact.
+
+    dimension.is-base_Param:
+          in: query
+          name: dimension.is-base
+          schema:
+            type: boolean
+          description: A boolean value that indicates if the dimension (aspect) is a base element in the reporting taxonomy or a company extension.
+    dimension.local-name_Param:
+          in: query
+          name: dimension.local-name
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: Local name of the dimension used with the fact.
+    dimension.namespace_Param:
+          in: query
+          name: dimension.namespace
+          schema:
+            type: string
+          description: Namespace of the dimension used with the fact.
+    dimensions.count_Param:
+          in: query
+          name: dimensions.count
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+          description: The number of dimensional qualifiers associated with a given fact. A comma-delimited list will return facts with 0, 1, 2 etc. dimensions.
+    dimensions.id_Param:
+       in: query
+       name: dimensions.id
+       schema:
+          type: string
+       description: ID of the dimension.
+
+    document.top-level_Param:
+      in: query
+      name: document.top-level
+      schema:
+          type: boolean
+      description: Boolean that indicates if the file in a DTS is the entry point.
+    document.uri_Param:
+      in: query
+      name: document.uri
+      schema:
+          type: boolean
+      description: The URL at which the document comprising the DTS is located.
+
+    dts.entry-point_Param:
+       in: query
+       name: dts.entry-point
+       schema:
+          type: string
+       description: The URL entry point of a discoverable taxonomy set. This is also referred to as the entry point for a taxonomy. A taxonomy can have multiple entry points and the resulting set of taxonomies of using an entry point is called a DTS. For example http://xbrl.fasb.org/us-gaap/2019/entire/us-gaap-entryPoint-all-2019-01-31.xsd
+    dts.hash_Param:
+       in: query
+       name: dts.hash
+       schema:
+          type: string
+       description: The DTS identifier for a given group of taxonomies as a hex hash. XBRL facts and linkbases are typically associated with a given report that is asscociated with a DTS.
+    dts.id_Param:
+        in: query
+        name: dts.id
+        style: form
+        explode: false
+        schema:
+          type: array
+          items:
+            type: integer
+        description: A unique integer as a DTS identifier for a given group of taxonomies. XBRL facts and linkbases are typically associated with a given report that is asscociated with a DTS.
+    dts.taxonomy_Param:
+       in: query
+       name: dts.taxonomy
+       schema:
+          type: string
+       description: The taxonomy group that the taxonomy belongs to.
+       example: US GAAP
+    dts.taxonomy-name_Param:
+       in: query
+       name: dts.taxonomy-name
+       schema:
+          type: string
+       description: The specific taxonomy name such as `Form 1` or `Form 2`.
+       example: Form 2 2021
+    dts.target-namespace_Param:
+       in: query
+       name: dts.target-namespace
+       schema:
+          type: string
+       description: The target namespace of a discoverable taxonomy set (DTS).
+    dts.version_Param:
+       in: query
+       name: dts.version
+       schema:
+          type: string
+       description: The specific taxonomy version name, such as `2019` for US GAAP.
+       example: 2019
+
+    entity.cid_Param:
+       in: query
+       name: entity.cid
+       style: form
+       explode: false
+       schema:
+          type: array
+          items:
+             type: string
+       description: The CID is the FERC identifier used to identify a reporting entity. This is the CID associated with a given fact, DTS or report.
+    entity.id_Param:
+       in: query
+       name: entity.id
+       style: form
+       explode: false
+       schema:
+          type: array
+          items:
+             type: integer
+       description: The internal identifier used to identify an entity. This will be replaced with the LEI when the FERC supports the LEI standard.
+    entity.name_Param:
+       in: query
+       name: entity.name
+       schema:
+          type: string
+       description: The name of the entity reporting. 
+
+    fact.has-dimensions_Param:
+       in: query
+       name: fact.has-dimensions
+       schema:
+          type: boolean
+       description: his boolean field indicates if the fact has any dimensions associated with it.
+    fact.hash_Param:
+       in: query
+       name: fact.hash
+       schema:
+          type: string
+       description: The fact hash is derived from the aspect properties of the fact. Each fact will have a different hash in a given report. Over time however, different facts may have the same hash if they are identical. The hash does not take into account the value reported for the fact. The fact hash is used to determine the ultimus index. By searching on the hash you can identify all identical facts that were reported.
+    fact.id_Param:
+       in: query
+       name: fact.id
+       style: form
+       explode: false
+       schema:
+          type: array
+          items:
+             type: integer
+       description: The internal identifier used to identify a fact.
+    fact.is-extended_Param:
+       in: query
+       name: fact.is-extended
+       schema:
+          type: boolean
+       description: This indicates if the fact is comprised of either an extension concept, extension axis or extension member.
+    fact.ultimus_Param:
+       in: query
+       name: fact.ultimus
+       schema:
+          type: boolean
+       description: A boolean that indicates if the fact is the latest value reported.  A value of true represents the latest value reported.  A value of false represents that the value has been superceded with a more recent fact. If requesting values from a specific report, the ultimus should not be used as a search parameter, as all the fact values will not be returned if a subsequent report has been filed in which the fact appears.
+    fact.ultimus-index_Param:
+       in: query
+       name: fact.ultimus-index
+       style: form
+       explode: false
+       schema:
+         type: array
+         items:
+          type:  integer
+       description: An integer that records the incarnation of the fact. The same fact may be reported many times and the ultimus field represents the reverse order of incarnation for the fact's reporting. A value of 1 indicates that this is the latest value of the fact. A value of 6 for example would indicate that the value has been reported 6 times subsquent to the fact's most-recent reporting. If requesting values from a specific report, the ultimus index should not be used as a search parameter, as all the fact values will not be returned if a subsequent report has been filed in which the fact appears.
+    fact.value_Param:
+       in: query
+       name: fact.value
+       schema:
+          type: string
+       description: The value of the fact as a text value. This includes numerical as well as non-numerical values reported.
+
+    label.text_Param:
+        in: query
+        name: label.text
+        schema:
+          type: string
+        description: Portion of the label text to be searched on.
+    label.role_Param:
+        in: query
+        name: label.role
+        schema:
+          type: string
+        description: The label role to be searched on, usually used in conjunction with label.text.
+
+    member.is-base_Param:
+       in: query
+       name: member.is-base
+       schema:
+          type: boolean
+       description: A boolean value that indicates if the member is a base element in the reporting taxonomy or a company extension.  
+    member.local-name_Param:
+       in: query
+       name: member.local-name
+       style: form
+       explode: false
+       schema:
+          type: array
+          items:
+             type: string
+       description: Local name of the member.
+    member.namespace_Param:
+       in: query
+       name: member.namespace
+       schema:
+          type: string
+       description: Namespace of the member.
+
+    network.arcrole-uri_Param:
+      in: query
+      name: network.arcrole-uri
+      schema:
+          type: string
+          format: uri
+      description: URI that identifies the link types, such as parent-child. However, this is the full URI of http://www.xbrl.org/2003/arcrole/parent-child.
+      example: http://www.xbrl.org/2003/arcrole/parent-child
+    network.id_Param:
+      in: query
+      name: network.id
+      schema:
+          type: integer
+      description: Unique internal identifier used to identify a specific network. A different identifier is used for networks with the same role but different linkbase types.
+    network.link-name_Param:
+      in: query
+      name: network.link-name
+      schema:
+          type: string
+      description: Name that identifies the link type. This corresponds to a linkbase i.e. presentationLink, calculationLink, definitionLink.
+    network.role-description_Param:
+      in: query
+      name: network.role-description
+      schema:
+        type: string
+      description: Readable name or description of the header.
+      example: 40201 - Disclosure - Balance Sheet Components (Details)
+    network.role-uri_Param:
+      in: query
+      name: network.role-uri
+      schema:
+          type: string
+          format: uri
+      description: The URI of the network role. This would appear as a URI describing the reporting group i.e. http://www.bc.com/role/DisclosureBalanceSheetComponentsDetails.
+      example: http://www.bc.com/role/DisclosureBalanceSheetComponentsDetails 
+ 
+    period.calendar-period_Param:
+       in: query
+       name: period.calendar-period
+       style: form
+       explode: false
+       allowEmptyValue : false
+       schema:
+          type: array
+          items:
+             type: string
+             enum: [Y,1Q,2Q,3Q,4Q,3QCUM,1H,2H]
+       description: The period identifier for the fact such as year(Y) quarters such as (Q1,Q2,Q3,Q4), cumulative quarters such as 3QCUM, and half years such as H1 and H2. The calendar period aligns the periods with a calendar year. A company with a year end of 30 September would have a fiscal 4th quarter which would be a calendar quarter of Q3.
+    period.fiscal-id_Param:
+       in: query
+       name: period.fiscal-id
+       schema:
+          type: string
+       description: The identifier of the fiscal period. Each period has an assigned hash which identifies the fiscal period. The hash can be used to search for periods that are identical. Periods with the same period and year in fact may be different as the fiscal periods and years are approximations. The logic applied in the API is that if a fact is more than 15 days into a year beginning January 1, the fact is in the same fiscal year as the year beginning January 1. 
+    period.fiscal-period_Param:
+       in: query
+       name: period.fiscal-period
+       style: form
+       explode: false
+       allowEmptyValue : false
+       schema:
+          type: array
+          uniqueItems: true
+          items:
+             type: string
+             enum: [Y,1Q,2Q,3Q,4Q,3QCUM,1H,2H]
+       description: The period identifier for the fact such as year(Y) quarters such as (Q1,Q2,Q3,Q4), cumulative quarters such as 3QCUM, and half years such as H1 and H2. The fiscal period aligns the periods with a fiscal year. A company with a year end of 30 September would have a fiscal 4th quarter which would be a fiscal quarter of Q4 and a calender quarter of Q3.
+    period.fiscal-year_Param:
+       in: query
+       name: period.fiscal-year
+       style: form
+       explode: false
+       allowEmptyValue : false
+       schema:
+          type: array
+          uniqueItems: true
+          items:
+             type: integer
+       description: The fiscal year in which the fact is applicable in the format 'YYYY'.
+    period.id_Param:
+       in: query
+       name: period.id
+       schema:
+          type: string
+       description: The identifier of the calender period. Each period has an assigned hash which identifies the period. The hash can be used to search for periods that are identical. Periods with the same period and year in fact may be different as the fiscal period is an approximation. 
+    period.year_Param:
+       in: query
+       name: period.year
+       style: form
+       explode: false
+       allowEmptyValue : false
+       schema:
+          type: array
+          uniqueItems: true
+          items:
+             type: integer
+       description: The calendar year in which the fact is applicable in the format 'YYYY'.
+
+    relationship.id_Param:
+      in: query
+      name: relationship.id
+      schema:
+          type: integer
+      description: An internal identifier associated with the relationship.  
+    relationship.order_Param:
+      in: query
+      name: relationship.order
+      schema:
+          type: number
+      description: The order of the relationships relative to each other. 
+    relationship.preferred-label_Param:
+      in: query
+      name: relationship.preferred-label
+      schema:
+          type: string
+          format: uri
+      description: The preferred label attribute value associated with a relationship.
+    relationship.source-concept-id_Param:
+      in: query
+      name: relationship.source-concept-id
+      schema:
+          type: integer
+      description: The unique identifier for the concept that is the basis of the relationship.
+    relationship.source-name_Param:
+      in: query
+      name: relationship.source-name
+      schema:
+          type: string
+      description: The name of the concept that is the basis of the relationship. 
+    relationship.source-namespace_Param:
+      in: query
+      name: relationship.source-namespace
+      schema:
+          type: string
+          format: uri      
+      description: The namespace of the concept that is the basis of the relationship. 
+    relationship.target-concept-id_Param:
+      in: query
+      name: relationship.target-concept-id
+      schema:
+          type: integer
+      description: The unique identifier for the concept under the source relationship.
+    relationship.target-is-abstract_Param:
+      in: query
+      name: relationship.target-is-abstract
+      schema:
+          type: boolean
+      description: The abstract indicator (boolean) of the concept under the source relationship.
+    relationship.target-name_Param:
+      in: query
+      name: relationship.target-name
+      schema:
+          type: string
+      description: The name of the concept under the source relationship.  
+    relationship.target-namespace_Param:
+      in: query
+      name: relationship.target-namespace
+      schema:
+          type: string
+          format: uri
+      description: The namespace of the concept under the source relationship.  
+    relationship.tree-depth_Param:
+      in: query
+      name: relationship.tree-depth
+      schema:
+          type: integer
+      description: When viewed as a tree, the value represents the number of positions from the root node of the relationship. 
+    relationship.tree-sequence_Param:
+      in: query
+      name: relationship.tree-sequence
+      schema:
+          type: integer
+      description: The order in which the relationship appears in the entire network.  
+
+    report.form-type_Param:
+       in: query
+       name: report.form-type
+       style: form
+       explode: false
+       allowEmptyValue : false
+       schema:
+          type: array
+          uniqueItems: true
+          items:
+             type: string
+       description: The document type of the report e.g. 2, 2A, 1 1-Q, 714, 6, 60 etc.   
+    report.filing-id_Param:
+       in: query
+       name: report.filing-id
+       schema:
+          type: string
+       description: The unique identifier (inclusive of the entity CID) used by the FERC for a report. No comma separated values are allowed.
+    report.creation-software_Param:
+       in: query
+       name: report.creation-software
+       schema:
+          type: string
+       description: The creation software that was used to create a report.
+    report.entity-name_Param:
+       in: query
+       name: report.entity-name
+       schema:
+          type: string
+       description: The name of the entity submitting the report. Enter the full entity name, or a portion of the entity name.
+    report.entry-type_Param:
+       in: query
+       name: report.entry-type
+       schema:
+          type: string
+          enum: [instance,inline]
+       description: The entry type of the report. This could be instance, inline, JSON, etc.
+    report.entry-url_Param:
+       in: query
+       name: report.entry-url
+       schema:
+          type: string
+       description: The URL entry point of a discoverable taxonomy set. This is also referred to as the entry point for a taxonomy. This represents the DTS entry point for a specific report.
+    report.filer-category_Param:
+      in: query
+      name: report.filer-category
+      schema:
+          type: string
+          enum: [Large Accelerated Filer,Accelerated Filer,Non-accelerated Filer]
+      description: > 
+              Filer category of the report. Can be one of the following:  
+                - Large Accelerated Filer  
+                - Accelerated Filer  
+                - Non-accelerated Filer  
+    report.filing-year_Param:
+      in: query  
+      name: report.filing-year
+      schema:
+          type: integer 
+      description: >
+          Year in which the filing was made.
+    report.id_Param:
+       in: query
+       name: report.id
+       style: form
+       explode: false
+       allowEmptyValue : false
+       schema:
+          type: array
+          uniqueItems: true
+          items:
+             type: integer
+       description: The internal identifier assigned to a report.   
+    report.is-most-current_Param:
+       in: query
+       name: report.is-most-current
+       schema:
+          type: boolean
+       description: A boolean indicator for whether the report is the most current (true).
+    report.period_Param:
+       in: query
+       name: report.period
+       style: form
+       explode: false
+       allowEmptyValue : false
+       schema:
+          type: array
+          uniqueItems: true
+          items:
+             type: string
+       description: The period of the report i.e Q1, Q2, Q3, Q4 etc.  
+    report.period-index_Param:
+      in: query
+      name: report.period-index
+      style: form
+      explode: false
+      schema:
+          type: array
+          items:
+            type: integer
+      description: Allows the retrieval of reports other than most current. A value of 1 gets the latest report. A value of 2 gets the second to last report etc.
+    report.restated_Param:
+       in: query
+       name: report.restated
+       schema:
+          type: boolean
+       description: A boolean that indicates if the report has been subsequently restated.  A value of true represents that the report has been subsequently restated by another report.  A value of false means that this report has not been subsequently restated by another report.
+    report.restated-index_Param:
+       in: query
+       name: report.restated-index
+       style: form
+       explode: false
+       schema:
+         type: array
+         items:
+            type:  integer
+       description: A numerical indicator that can be used to identify if a report has been restated. If the value is 1 it indicates that this is the latest report. If the value is 2 it means that an updated copy of the report has been filed.
+    report.cid_Param:
+       in: query
+       name: report.cid
+       schema:
+          type: string
+       description: The CID of the company.
+    report.year_Param:
+       in: query
+       name: report.year
+       style: form
+       explode: false
+       schema:
+            type: array
+            items:
+              type: string
+       description: Integer that represents the Standard Industrial Classification (SIC) code used by the FERC in the United States.
+    report.source-id_Param:
+       in: query
+       name: report.source-id
+       schema:
+          type: integer
+       description: ID of the filing program.
+    report.source-name_Param:
+       in: query
+       name: report.source-name
+       schema:
+          type: string
+       description: Name of the source of the data such as FERC.
+
+    unit_Param:
+       in: query
+       name: unit
+       style: form
+       explode: false
+       schema:
+          type: array
+          uniqueItems: true
+          items:
+             type: string
+       description: The unit of measure associated with the fact, such as USD.
+
+  responses:
+    bad_request:
+      description: >
+        Malformed request or missing fields. Check that Content-Type matches the format/encoding, and that all required fields are spelled correctly, have correct types, and valid values. 
+      content:
+        applications/json:
+          schema:
+            $ref: '#/components/schemas/error_message'
+          example:
+            error: bad_request
+            error_description: Missing a field 'xxx'
+    bad_token:
+      description: The token is invalid, expired, or corrupted.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/error_message'
+          example:
+            error: unauthorized,
+            error_description: Cannot convert access token to JSON
+    unauthorized:
+      description: >
+        Bad credentials, or could not read credentials due to malformed JSON.
+         * "Full authentication is required..." -> malformed JSON
+         * "Bad client credentials" -> client_id/client_secret pair invalid
+         * "Bad credentials" -> username/password pair invalid
+      content:
+        applications/json:
+          schema:
+            $ref: '#/components/schemas/error_message'
+          example:
+            error: unauthorized
+            error_description: Full authentication is required to access this resource
+    not_found:
+      description: This resource doesn't exist or you don't have the permissions to view it.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/error_message'
+          example: 
+            error: not_found
+            error_description: An entity with that name could not be found.
+    method_not_allowed:
+      description: Method not allowed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/error_message'
+          example: 
+            error: method_not_allowed
+            error_description: Request method 'DELETE' not supported
+    internal_server_error:
+      description: Internal error, not the fault of the client.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/error_message'
+          example: 
+            error: internal_error
+            error_description: Unknown error, try again later
