@@ -1,0 +1,88 @@
+<!-- HTML for static distribution bundle build -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>FERC Documentation</title>
+    <link rel="stylesheet" type="text/css" href="./src/swagger-ui.css" >
+    <!--<link rel="stylesheet" href="./src/xus-api.css">-->
+	<link rel="icon" type="image/png" href="./src/favicon-32x32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="./src/favicon-16x16.png" sizes="16x16" />
+    <style>
+      html
+      {
+        box-sizing: border-box;
+        overflow: -moz-scrollbars-vertical;
+        overflow-y: scroll;
+      }
+
+      *,
+      *:before,
+      *:after
+      {
+        box-sizing: inherit;
+      }
+
+      body
+      {
+        margin:0;
+        background: #fafafa;
+      }
+	  .swagger-ui .topbar {
+		padding: 8px 30px;
+		background-color: #E2E2E2;
+		height: 12px !important;
+		background-image: url('./src/bar.png') !important;
+	  }
+	  .swagger-ui .title {
+	  padding-top: 20px !important;
+	  } 
+	  form .download-url-input, form .download-url-button
+	  {
+	  display:none !important;
+	  }
+	  div .topbar-wrapper
+	  {
+	  }
+	  .topbar-wrapper img[alt="Swagger UI"], .topbar-wrapper span 
+	  {
+		visibility: collapse;
+	  }
+	  .topbar-wrapper .link:before
+	  {
+		content: url('./src/logo.png');
+		margin-top:8px;
+		margin-left: -28px !important;
+	  }
+    </style>
+  </head>
+
+  <body>
+    <div id="swagger-ui"></div>
+
+    <script src="./src/swagger-ui-bundle.js"> </script>
+    <script src="./src/swagger-ui-standalone-preset.js"> </script>
+    <script>
+    window.onload = function() {
+      // Begin Swagger UI call region
+      const ui = SwaggerUIBundle({
+        url: "https://raw.githubusercontent.com/xbrlus/ferc-api/master/fercapi.yaml",
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl
+        ],
+		// docExpansion: 'full',
+        layout: "StandaloneLayout"
+      })
+      // End Swagger UI call region
+
+      window.ui = ui
+    }
+  </script>
+  </body>
+</html>
