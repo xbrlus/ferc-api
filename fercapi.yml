@@ -2,7 +2,7 @@ openapi: 3.0.0
 # FERC API
 servers:
   - description: Running this application XBRL US server
-    url: 'https://eforms.ferc.gov/'
+    url: 'https://uat.eforms.ferc.gov/'
 
 info:
   version: "V1"
@@ -24,7 +24,7 @@ info:
     1. Send an HTTP `POST` request to the tokenUrl: `/oauth2/token`:
       ```http
       POST /oauth2/token HTTP/1.1 
-      Host: <eforms.ferc.gov> 
+      Host: <uat.eforms.ferc.gov> 
       Content-Type: application/x-www-form-urlencoded 
       Body: {
         "grant_type": password,
